@@ -1,0 +1,31 @@
+cmake_minimum_required(VERSION 3.10)
+project(vulkan_compute LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+
+add_subdirectory(third_party/glfw)
+add_subdirectory(third_party/glslang)
+
+add_executable(${PROJECT_NAME} 
+    euler_fluid/main.cpp 
+    euler_fluid/vk_image.h
+    euler_fluid/vk_kernel.h
+)
+
+target_link_libraries(
+    ${PROJECT_NAME} PUBLIC 
+    glfw
+    glslang
+    glslang-default-resource-limits
+    SPIRV
+)
+
+target_include_directories(
+    ${PROJECT_NAME} PUBLIC
+    "${PROJECT_SOURCE_DIR}/third_party/vulkan/include"
+    "${PROJECT_SOURCE_DIR}/third_party/VulkanMemoryAllocator/include"
+    "${PROJECT_SOURCE_DIR}/third_party/glfw/include"
+    "${PROJECT_SOURCE_DIR}/third_party/glm"
+    "${PROJECT_SOURCE_DIR}/third_party/glslang"
+)
+
+file(COPY "${CMAKE_SOURCE_DIR}/shader/euler_fluid" DESTINATION ${CMAKE_BINARY_DIR})
