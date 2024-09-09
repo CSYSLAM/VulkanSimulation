@@ -8,7 +8,7 @@
 #include <atomic>
 
 #ifndef MU_SHADER_PATH
-#define MU_SHADER_PATH "../shader/"
+#define MU_SHADER_PATH "../shader/sph/"
 #endif
 #define SPH_NUM_PARTICLES 20000
 #define SPH_PARTICLE_RADIUS 0.005f
