@@ -41,6 +41,8 @@
 #define BUFFER_ELEMENTS 32
 #define LOG(...) printf(__VA_ARGS__)
 
+std::string shaderDir = "glsl/computesph/";
+const std::string shadersPath = getShaderBasePath() + shaderDir;
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugMessageCallback(
 	VkDebugReportFlagsEXT flags,
@@ -85,7 +87,7 @@ public:
 	std::vector<VkFramebuffer> swapchainFrameBuffer_;
 	VkPipelineCache globalPipelineCache_;
 	VkDescriptorPool globalDescriptorPool_;
-	VkBuffer packedParticlesBuffer_;
+	VkBuffer particlesBuffer_;
 	VkDeviceMemory packedParticlesMemory_;
 	VkPipelineLayout graphicsPipelineLayout_;
 	VkPipeline graphicsPipeline_;
@@ -153,19 +155,19 @@ public:
 	VkShaderModule shaderModule;
 
 	// ssbo sizes
-	const uint64_t positionSsboSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
-	const uint64_t velocitySsboSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
-	const uint64_t forceSsboSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
-	const uint64_t densitySsboSize_ = sizeof(float) * NUM_PARTICLES;
-	const uint64_t pressureSsboSize_ = sizeof(float) * NUM_PARTICLES;
+	const uint64_t positionBufferSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
+	const uint64_t velocityBufferSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
+	const uint64_t forceBufferSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
+	const uint64_t densityBufferSize_ = sizeof(float) * NUM_PARTICLES;
+	const uint64_t pressureBufferSize_ = sizeof(float) * NUM_PARTICLES;
 
-	const uint64_t packedBufferSize_ = positionSsboSize_ + velocitySsboSize_ + forceSsboSize_ + densitySsboSize_ + pressureSsboSize_;
+	const uint64_t bufferSize_ = positionBufferSize_ + velocityBufferSize_ + forceBufferSize_ + densityBufferSize_ + pressureBufferSize_;
 	// ssbo offsets
-	const uint64_t positionSsboOffset_ = 0;
-	const uint64_t velocitySsboOffset_ = positionSsboSize_;
-	const uint64_t forceSsboOffset_ = velocitySsboOffset_ + velocitySsboSize_;
-	const uint64_t densitySsboOffset_ = forceSsboOffset_ + forceSsboSize_;
-	const uint64_t pressureSsboOffset_ = densitySsboOffset_ + densitySsboSize_;
+	const uint64_t positionBufferOffset_ = 0;
+	const uint64_t velocityBufferOffset_ = positionBufferSize_;
+	const uint64_t forceBufferOffset_ = velocityBufferOffset_ + velocityBufferSize_;
+	const uint64_t densityBufferOffset_ = forceBufferOffset_ + forceBufferSize_;
+	const uint64_t pressureBufferOffset_ = densityBufferOffset_ + densityBufferSize_;
 
 	VkDebugReportCallbackEXT debugReportCallback{};
 
@@ -209,47 +211,6 @@ public:
 
 		glfwSetKeyCallback(window_, key_callback);
 	}
-
-	//VkResult createBuffer(VkBufferUsageFlags usageFlags, VkMemoryPropertyFlags memoryPropertyFlags, VkBuffer* buffer, VkDeviceMemory* memory, VkDeviceSize size, void* data = nullptr)
-	//{
-	//	// Create the buffer handle
-	//	VkBufferCreateInfo bufferCreateInfo = vks::initializers::bufferCreateInfo(usageFlags, size);
-	//	bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	//	VK_CHECK_RESULT(vkCreateBuffer(device, &bufferCreateInfo, nullptr, buffer));
-
-	//	// Create the memory backing up the buffer handle
-	//	VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
-	//	vkGetPhysicalDeviceMemoryProperties(physicalDevice, &deviceMemoryProperties);
-	//	VkMemoryRequirements memReqs;
-	//	VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo();
-	//	vkGetBufferMemoryRequirements(device, *buffer, &memReqs);
-	//	memAlloc.allocationSize = memReqs.size;
-	//	// Find a memory type index that fits the properties of the buffer
-	//	bool memTypeFound = false;
-	//	for (uint32_t i = 0; i < deviceMemoryProperties.memoryTypeCount; i++) {
-	//		if ((memReqs.memoryTypeBits & 1) == 1) {
-	//			if ((deviceMemoryProperties.memoryTypes[i].propertyFlags & memoryPropertyFlags) == memoryPropertyFlags) {
-	//				memAlloc.memoryTypeIndex = i;
-	//				memTypeFound = true;
-	//				break;
-	//			}
-	//		}
-	//		memReqs.memoryTypeBits >>= 1;
-	//	}
-	//	assert(memTypeFound);
-	//	VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, memory));
-
-	//	if (data != nullptr) {
-	//		void* mapped;
-	//		VK_CHECK_RESULT(vkMapMemory(device, *memory, 0, size, 0, &mapped));
-	//		memcpy(mapped, data, size);
-	//		vkUnmapMemory(device, *memory);
-	//	}
-
-	//	VK_CHECK_RESULT(vkBindBufferMemory(device, *buffer, *memory, 0));
-
-	//	return VK_SUCCESS;
-	//}
 
 	void CreateSwapchain()
 	{
@@ -476,21 +437,21 @@ public:
 	void CreateBuffers()
 	{
 		VkBufferCreateInfo particlesBufferCreateInfo = CsySmallVk::bufferCreateInfo();
-		particlesBufferCreateInfo.size = packedBufferSize_;
+		particlesBufferCreateInfo.size = bufferSize_;
 		particlesBufferCreateInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 		particlesBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 		particlesBufferCreateInfo.queueFamilyIndexCount = 0;
 		particlesBufferCreateInfo.pQueueFamilyIndices = nullptr;
-		vkCreateBuffer(device_, &particlesBufferCreateInfo, NULL, &packedParticlesBuffer_);
+		vkCreateBuffer(device_, &particlesBufferCreateInfo, NULL, &particlesBuffer_);
 
-		VkMemoryRequirements positionBufferMemoryRequirements = CsySmallVk::Query::memoryRequirements(device_, packedParticlesBuffer_);
+		VkMemoryRequirements positionBufferMemoryRequirements = CsySmallVk::Query::memoryRequirements(device_, particlesBuffer_);
 		VkMemoryAllocateInfo particleBufferMemoryAllocationInfo = CsySmallVk::memoryAllocateInfo();
 		particleBufferMemoryAllocationInfo.allocationSize = positionBufferMemoryRequirements.size;
 		particleBufferMemoryAllocationInfo.memoryTypeIndex = findMemoryType(positionBufferMemoryRequirements,
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 		VK_CHECK_RESULT(vkAllocateMemory(device_, &particleBufferMemoryAllocationInfo, NULL, &packedParticlesMemory_));
 		// bind the memory to the buffer object
-		vkBindBufferMemory(device_, packedParticlesBuffer_, packedParticlesMemory_, 0);
+		vkBindBufferMemory(device_, particlesBuffer_, packedParticlesMemory_, 0);
 		std::cout << "Successfully create buffers" << std::endl;
 	}
 
@@ -523,20 +484,14 @@ public:
 	void CreateGraphicsPipeline()
 	{
 		std::vector<VkPipelineShaderStageCreateInfo> shaderStageCreateInfos;
-		// create shader stage infos
-		std::cout << MU_SHADER_PATH "particle.vert.spv" << std::endl;
-		auto vertexShaderCode = CsySmallVk::readFile(MU_SHADER_PATH "particle.vert.spv");
-		VkShaderModule vertexShaderModule = CreateShaderModule(vertexShaderCode);
-		auto fragmentShaderCode = CsySmallVk::readFile(MU_SHADER_PATH "particle.frag.spv");
-		VkShaderModule fragmentShaderModule = CreateShaderModule(fragmentShaderCode);
 
 		VkPipelineShaderStageCreateInfo vertexShaderStageCreateInfo = CsySmallVk::pipelineShaderStageCreateInfo();
-		vertexShaderStageCreateInfo.module = vertexShaderModule;
+		vertexShaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "particle.vert.spv").c_str(), device_);
 		vertexShaderStageCreateInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
 		vertexShaderStageCreateInfo.pName = "main";
 
 		VkPipelineShaderStageCreateInfo fragmentShaderStageCreateInfo = CsySmallVk::pipelineShaderStageCreateInfo();
-		fragmentShaderStageCreateInfo.module = fragmentShaderModule;
+		fragmentShaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "particle.frag.spv").c_str(), device_);
 		fragmentShaderStageCreateInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
 		fragmentShaderStageCreateInfo.pName = "main";
 
@@ -752,7 +707,7 @@ public:
 			vkCmdBindPipeline(graphicsCommandBuffer_[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline_);
 
 			VkDeviceSize offsets = 0;
-			vkCmdBindVertexBuffers(graphicsCommandBuffer_[i], 0, 1, &packedParticlesBuffer_, &offsets);
+			vkCmdBindVertexBuffers(graphicsCommandBuffer_[i], 0, 1, &particlesBuffer_, &offsets);
 			vkCmdDraw(graphicsCommandBuffer_[i], NUM_PARTICLES, 1, 0, 0);
 			vkCmdEndRenderPass(graphicsCommandBuffer_[i]);
 
@@ -829,21 +784,21 @@ public:
 		}
 
 		VkDescriptorBufferInfo descriptorBufferInfos[5];
-		descriptorBufferInfos[0].buffer = packedParticlesBuffer_;
-		descriptorBufferInfos[0].offset = positionSsboOffset_;
-		descriptorBufferInfos[0].range = positionSsboSize_;
-		descriptorBufferInfos[1].buffer = packedParticlesBuffer_;
-		descriptorBufferInfos[1].offset = velocitySsboOffset_;
-		descriptorBufferInfos[1].range = velocitySsboSize_;
-		descriptorBufferInfos[2].buffer = packedParticlesBuffer_;
-		descriptorBufferInfos[2].offset = forceSsboOffset_;
-		descriptorBufferInfos[2].range = forceSsboSize_;
-		descriptorBufferInfos[3].buffer = packedParticlesBuffer_;
-		descriptorBufferInfos[3].offset = densitySsboOffset_;
-		descriptorBufferInfos[3].range = densitySsboSize_;
-		descriptorBufferInfos[4].buffer = packedParticlesBuffer_;
-		descriptorBufferInfos[4].offset = pressureSsboOffset_;
-		descriptorBufferInfos[4].range = pressureSsboSize_;
+		descriptorBufferInfos[0].buffer = particlesBuffer_;
+		descriptorBufferInfos[0].offset = positionBufferOffset_;
+		descriptorBufferInfos[0].range = positionBufferSize_;
+		descriptorBufferInfos[1].buffer = particlesBuffer_;
+		descriptorBufferInfos[1].offset = velocityBufferOffset_;
+		descriptorBufferInfos[1].range = velocityBufferSize_;
+		descriptorBufferInfos[2].buffer = particlesBuffer_;
+		descriptorBufferInfos[2].offset = forceBufferOffset_;
+		descriptorBufferInfos[2].range = forceBufferSize_;
+		descriptorBufferInfos[3].buffer = particlesBuffer_;
+		descriptorBufferInfos[3].offset = densityBufferOffset_;
+		descriptorBufferInfos[3].range = densityBufferSize_;
+		descriptorBufferInfos[4].buffer = particlesBuffer_;
+		descriptorBufferInfos[4].offset = pressureBufferOffset_;
+		descriptorBufferInfos[4].range = pressureBufferSize_;
 
 		// write descriptor sets
 		VkWriteDescriptorSet writeDescriptorSets[5];
@@ -877,11 +832,8 @@ public:
 	void CreateComputePipelines()
 	{
 		// first
-		auto computeDensityPressureShaderCode = CsySmallVk::readFile(MU_SHADER_PATH "compute_density_pressure.comp.spv");
-		VkShaderModule computeDensityPressureShaderModule = CreateShaderModule(computeDensityPressureShaderCode);
 		VkPipelineShaderStageCreateInfo shaderStageCreateInfo = CsySmallVk::pipelineShaderStageCreateInfo();
-		shaderStageCreateInfo.module = computeDensityPressureShaderModule;
-		shaderStageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "compute_density_pressure.comp.spv").c_str(), device_);
 		shaderStageCreateInfo.pName = "main";
 
 		VkComputePipelineCreateInfo createInfo = CsySmallVk::computePipelineCreateInfo();
@@ -962,7 +914,7 @@ public:
 		VkBuffer stagingBufferHandle = VK_NULL_HANDLE;
 		VkDeviceMemory stagingBufferMemoryDeviceHandle = VK_NULL_HANDLE;
 		VkBufferCreateInfo stagingBufferCreateInfo = CsySmallVk::bufferCreateInfo();
-		stagingBufferCreateInfo.size = packedBufferSize_;
+		stagingBufferCreateInfo.size = bufferSize_;
 		stagingBufferCreateInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 		stagingBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 		stagingBufferCreateInfo.queueFamilyIndexCount = 0;
@@ -999,8 +951,8 @@ public:
 			}
 		}
 		// zero all 
-		std::memset(mappedMemory, 0, packedBufferSize_);
-		std::memcpy(mappedMemory, initialParticlePosition.data(), positionSsboSize_);
+		std::memset(mappedMemory, 0, bufferSize_);
+		std::memcpy(mappedMemory, initialParticlePosition.data(), positionBufferSize_);
 		vkUnmapMemory(device_, stagingBufferMemoryDeviceHandle);
 
 		// submit a command buffer to copy staging buffer to the particle buffer 
@@ -1022,7 +974,7 @@ public:
 			stagingBufferMemoryRequirements.size
 		};
 
-		vkCmdCopyBuffer(copyCommandBufferHandle, stagingBufferHandle, packedParticlesBuffer_, 1, &bufferCopyRegion);
+		vkCmdCopyBuffer(copyCommandBufferHandle, stagingBufferHandle, particlesBuffer_, 1, &bufferCopyRegion);
 		VK_CHECK_RESULT(vkEndCommandBuffer(copyCommandBufferHandle));
 		VkSubmitInfo submitInfo = CsySmallVk::submitInfo();
 		submitInfo.commandBufferCount = 1;
