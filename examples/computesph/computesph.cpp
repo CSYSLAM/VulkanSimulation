@@ -306,10 +306,7 @@ public:
 			create_info.clipped = VK_TRUE;
 			create_info.oldSwapchain = VK_NULL_HANDLE;
 		}
-
-		if (vkCreateSwapchainKHR(device_, &create_info, nullptr, &swapchain_) != VK_SUCCESS) {
-			throw std::runtime_error("failed to create swap chain!");
-		}
+		VK_CHECK_RESULT(vkCreateSwapchainKHR(device_, &create_info, nullptr, &swapchain_));
 		std::cout << "Successfully created swapchain" << std::endl;
 	}
 
@@ -527,6 +524,7 @@ public:
 	{
 		std::vector<VkPipelineShaderStageCreateInfo> shaderStageCreateInfos;
 		// create shader stage infos
+		std::cout << MU_SHADER_PATH "particle.vert.spv" << std::endl;
 		auto vertexShaderCode = CsySmallVk::readFile(MU_SHADER_PATH "particle.vert.spv");
 		VkShaderModule vertexShaderModule = CreateShaderModule(vertexShaderCode);
 		auto fragmentShaderCode = CsySmallVk::readFile(MU_SHADER_PATH "particle.frag.spv");
@@ -872,8 +870,7 @@ public:
 		layoutCreateInfo.pSetLayouts = &computeDescriptorSetLayout_;
 		layoutCreateInfo.pushConstantRangeCount = 0;
 		layoutCreateInfo.pPushConstantRanges = nullptr;
-		if (vkCreatePipelineLayout(device_, &layoutCreateInfo, nullptr, &computePipelineLayout_) != VK_SUCCESS)
-			throw std::runtime_error("failed to create pipeline layout!");
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device_, &layoutCreateInfo, nullptr, &computePipelineLayout_));
 		std::cout << "Successfully create compute pipeline layout" << std::endl;
 	}
 
@@ -892,30 +889,21 @@ public:
 		createInfo.basePipelineIndex = 0;
 		createInfo.stage = shaderStageCreateInfo;
 		createInfo.layout = computePipelineLayout_;
-		if (vkCreateComputePipelines(device_, globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[0]) != VK_SUCCESS)
-		{
-			throw std::runtime_error("first compute pipeline creation failed");
-		}
+		VK_CHECK_RESULT(vkCreateComputePipelines(device_, globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[0]));
 
 		//second
 		auto computeForceShaderCode = CsySmallVk::readFile(MU_SHADER_PATH "compute_force.comp.spv");
 		VkShaderModule computeForceShaderModule = CreateShaderModule(computeForceShaderCode);
 		shaderStageCreateInfo.module = computeForceShaderModule;
 		createInfo.stage = shaderStageCreateInfo;
-		if (vkCreateComputePipelines(device_, globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[1]) != VK_SUCCESS)
-		{
-			throw std::runtime_error("first compute pipeline creation failed");
-		}
+		VK_CHECK_RESULT(vkCreateComputePipelines(device_, globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[1]));
 
 		//third
 		auto integrateShaderCode = CsySmallVk::readFile(MU_SHADER_PATH "integrate.comp.spv");
 		VkShaderModule integrateShaderModule = CreateShaderModule(integrateShaderCode);
 		shaderStageCreateInfo.module = integrateShaderModule;
 		createInfo.stage = shaderStageCreateInfo;
-		if (vkCreateComputePipelines(device_, globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[2]) != VK_SUCCESS)
-		{
-			throw std::runtime_error("first compute pipeline creation failed");
-		}
+		VK_CHECK_RESULT(vkCreateComputePipelines(device_, globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[2]));
 		std::cout << "Successfully create compute pipelines" << std::endl;
 	}
 
@@ -924,11 +912,7 @@ public:
 		VkCommandPoolCreateInfo createInfo = CsySmallVk::commandPoolCreateInfo();
 		createInfo.queueFamilyIndex = queueFamilyIndex_;
 		createInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		if (vkCreateCommandPool(device_, &createInfo, NULL, &computeCommandPool_) != VK_SUCCESS)
-		{
-			throw std::runtime_error("command pool creation failed");
-		}
-
+		VK_CHECK_RESULT(vkCreateCommandPool(device_, &createInfo, NULL, &computeCommandPool_));
 		std::cout << "Successfully create compute command pool" << std::endl;
 	}
 
@@ -944,10 +928,7 @@ public:
 		}
 		VkCommandBufferBeginInfo beginInfo = CsySmallVk::commandBufferBeginInfo();
 		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-		if (vkBeginCommandBuffer(computeCommandBuffer_, &beginInfo) != VK_SUCCESS)
-		{
-			throw std::runtime_error("command buffer begin failed");
-		}
+		VK_CHECK_RESULT(vkBeginCommandBuffer(computeCommandBuffer_, &beginInfo));
 		vkCmdBindDescriptorSets(computeCommandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout_, 0, 1, &computeDescriptorSet_, 0, NULL);
 		// First dispatch
 		vkCmdBindPipeline(computeCommandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_[0]);
@@ -996,10 +977,7 @@ public:
 		allocInfo.allocationSize = stagingBufferMemoryRequirements.size;
 		allocInfo.memoryTypeIndex = findMemoryType(stagingBufferMemoryRequirements,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-		if (vkAllocateMemory(device_, &allocInfo, NULL, &stagingBufferMemoryDeviceHandle) != VK_SUCCESS)
-		{
-			throw std::runtime_error("memory allocation failed");
-		}
+		VK_CHECK_RESULT(vkAllocateMemory(device_, &allocInfo, NULL, &stagingBufferMemoryDeviceHandle));
 
 		// bind the memory to the buffer object
 		vkBindBufferMemory(device_, stagingBufferHandle, stagingBufferMemoryDeviceHandle, 0);
@@ -1031,18 +1009,11 @@ public:
 		copyCommandBufferAllocationInfo.commandBufferCount = 1;
 		copyCommandBufferAllocationInfo.commandPool = computeCommandPool_;
 		copyCommandBufferAllocationInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-
-		if (vkAllocateCommandBuffers(device_, &copyCommandBufferAllocationInfo, &copyCommandBufferHandle) != VK_SUCCESS)
-		{
-			throw std::runtime_error("command buffer creation failed");
-		}
+		VK_CHECK_RESULT(vkAllocateCommandBuffers(device_, &copyCommandBufferAllocationInfo, &copyCommandBufferHandle));
 
 		VkCommandBufferBeginInfo commandBufferBeginInfo = CsySmallVk::commandBufferBeginInfo();
 		commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-		if (vkBeginCommandBuffer(copyCommandBufferHandle, &commandBufferBeginInfo) != VK_SUCCESS)
-		{
-			throw std::runtime_error("command buffer begin failed");
-		}
+		VK_CHECK_RESULT(vkBeginCommandBuffer(copyCommandBufferHandle, &commandBufferBeginInfo));
 
 		VkBufferCopy bufferCopyRegion
 		{
@@ -1052,23 +1023,14 @@ public:
 		};
 
 		vkCmdCopyBuffer(copyCommandBufferHandle, stagingBufferHandle, packedParticlesBuffer_, 1, &bufferCopyRegion);
-		if (vkEndCommandBuffer(copyCommandBufferHandle) != VK_SUCCESS)
-		{
-			throw std::runtime_error("command buffer end failed");
-		}
+		VK_CHECK_RESULT(vkEndCommandBuffer(copyCommandBufferHandle));
 		VkSubmitInfo submitInfo = CsySmallVk::submitInfo();
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &copyCommandBufferHandle;
 		submitInfo.waitSemaphoreCount = 0;
 		submitInfo.signalSemaphoreCount = 0;
-		if (vkQueueSubmit(computeQueue_, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS)
-		{
-			throw std::runtime_error("command buffer submission failed");
-		}
-		if (vkQueueWaitIdle(computeQueue_) != VK_SUCCESS)
-		{
-			throw std::runtime_error("vkQueueWaitIdle failed");
-		}
+		VK_CHECK_RESULT(vkQueueSubmit(computeQueue_, 1, &submitInfo, VK_NULL_HANDLE));
+		VK_CHECK_RESULT(vkQueueWaitIdle(computeQueue_));
 		vkFreeCommandBuffers(device_, computeCommandPool_, 1, &copyCommandBufferHandle);
 		vkFreeMemory(device_, stagingBufferMemoryDeviceHandle, NULL);
 		vkDestroyBuffer(device_, stagingBufferHandle, NULL);
@@ -1077,10 +1039,7 @@ public:
 
 	void RunSimulation()
 	{
-		if (vkQueueSubmit(computeQueue_, 1, &computeSubmitInfo_, VK_NULL_HANDLE) != VK_SUCCESS)
-		{
-			throw std::runtime_error("compute queue submission failed");
-		}
+		VK_CHECK_RESULT(vkQueueSubmit(computeQueue_, 1, &computeSubmitInfo_, VK_NULL_HANDLE));
 	}
 
 	void Render()
@@ -1088,10 +1047,7 @@ public:
 		// submit graphics command buffer
 		vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX, imageAvailableSemaphore_, VK_NULL_HANDLE, &imageIndex_);
 		graphicsSubmitInfo_.pCommandBuffers = graphicsCommandBuffer_.data() + imageIndex_;
-		if (vkQueueSubmit(graphicsQueue_, 1, &graphicsSubmitInfo_, VK_NULL_HANDLE) != VK_SUCCESS)
-		{
-			throw std::runtime_error("graphics queue submission failed");
-		}
+		VK_CHECK_RESULT(vkQueueSubmit(graphicsQueue_, 1, &graphicsSubmitInfo_, VK_NULL_HANDLE));
 		// queue the image for presentation
 		vkQueuePresentKHR(presentationQueue_, &presentInfo_);
 
@@ -1313,297 +1269,12 @@ public:
 		CreateComputeCommandPool();
 		CreateComputeCommandBuffer();
 		SetInitialParticleData();
-
-		//// Compute command pool
-		//VkCommandPoolCreateInfo cmdPoolInfo = {};
-		//cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		//cmdPoolInfo.queueFamilyIndex = queueFamilyIndex;
-		//cmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		//VK_CHECK_RESULT(vkCreateCommandPool(device, &cmdPoolInfo, nullptr, &commandPool));
-
-		///*
-		//	Prepare storage buffers
-		//*/
-		//std::vector<uint32_t> computeInput(BUFFER_ELEMENTS);
-		//std::vector<uint32_t> computeOutput(BUFFER_ELEMENTS);
-
-		//// Fill input data
-		//uint32_t n = 0;
-		//std::generate(computeInput.begin(), computeInput.end(), [&n] { return n++; });
-
-		//const VkDeviceSize bufferSize = BUFFER_ELEMENTS * sizeof(uint32_t);
-
-		//VkBuffer deviceBuffer, hostBuffer;
-		//VkDeviceMemory deviceMemory, hostMemory;
-
-		//// Copy input data to VRAM using a staging buffer
-		//{
-		//	createBuffer(
-		//		VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-		//		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-		//		&hostBuffer,
-		//		&hostMemory,
-		//		bufferSize,
-		//		computeInput.data());
-
-		//	// Flush writes to host visible buffer
-		//	void* mapped;
-		//	vkMapMemory(device, hostMemory, 0, VK_WHOLE_SIZE, 0, &mapped);
-		//	VkMappedMemoryRange mappedRange = vks::initializers::mappedMemoryRange();
-		//	mappedRange.memory = hostMemory;
-		//	mappedRange.offset = 0;
-		//	mappedRange.size = VK_WHOLE_SIZE;
-		//	vkFlushMappedMemoryRanges(device, 1, &mappedRange);
-		//	vkUnmapMemory(device, hostMemory);
-
-		//	createBuffer(
-		//		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-		//		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-		//		&deviceBuffer,
-		//		&deviceMemory,
-		//		bufferSize);
-
-		//	// Copy to staging buffer
-		//	VkCommandBufferAllocateInfo cmdBufAllocateInfo = vks::initializers::commandBufferAllocateInfo(commandPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
-		//	VkCommandBuffer copyCmd;
-		//	VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &copyCmd));
-		//	VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-		//	VK_CHECK_RESULT(vkBeginCommandBuffer(copyCmd, &cmdBufInfo));
-
-		//	VkBufferCopy copyRegion = {};
-		//	copyRegion.size = bufferSize;
-		//	vkCmdCopyBuffer(copyCmd, hostBuffer, deviceBuffer, 1, &copyRegion);
-		//	VK_CHECK_RESULT(vkEndCommandBuffer(copyCmd));
-
-		//	VkSubmitInfo submitInfo = vks::initializers::submitInfo();
-		//	submitInfo.commandBufferCount = 1;
-		//	submitInfo.pCommandBuffers = &copyCmd;
-		//	VkFenceCreateInfo fenceInfo = vks::initializers::fenceCreateInfo(VK_FLAGS_NONE);
-		//	VkFence fence;
-		//	VK_CHECK_RESULT(vkCreateFence(device, &fenceInfo, nullptr, &fence));
-
-		//	// Submit to the queue
-		//	VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, fence));
-		//	VK_CHECK_RESULT(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
-
-		//	vkDestroyFence(device, fence, nullptr);
-		//	vkFreeCommandBuffers(device, commandPool, 1, &copyCmd);
-		//}
-
-		///*
-		//	Prepare compute pipeline
-		//*/
-		//{
-		//	std::vector<VkDescriptorPoolSize> poolSizes = {
-		//		vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1),
-		//	};
-
-		//	VkDescriptorPoolCreateInfo descriptorPoolInfo =
-		//		vks::initializers::descriptorPoolCreateInfo(static_cast<uint32_t>(poolSizes.size()), poolSizes.data(), 1);
-		//	VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
-
-		//	std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
-		//		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 0),
-		//	};
-		//	VkDescriptorSetLayoutCreateInfo descriptorLayout =
-		//		vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
-		//	VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
-
-		//	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo =
-		//		vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
-		//	VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-
-		//	VkDescriptorSetAllocateInfo allocInfo =
-		//		vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
-		//	VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
-
-		//	VkDescriptorBufferInfo bufferDescriptor = { deviceBuffer, 0, VK_WHOLE_SIZE };
-		//	std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets = {
-		//		vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0, &bufferDescriptor),
-		//	};
-		//	vkUpdateDescriptorSets(device, static_cast<uint32_t>(computeWriteDescriptorSets.size()), computeWriteDescriptorSets.data(), 0, NULL);
-
-		//	VkPipelineCacheCreateInfo pipelineCacheCreateInfo = {};
-		//	pipelineCacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-		//	VK_CHECK_RESULT(vkCreatePipelineCache(device, &pipelineCacheCreateInfo, nullptr, &pipelineCache));
-
-		//	// Create pipeline
-		//	VkComputePipelineCreateInfo computePipelineCreateInfo = vks::initializers::computePipelineCreateInfo(pipelineLayout, 0);
-
-		//	// Pass SSBO size via specialization constant
-		//	struct SpecializationData {
-		//		uint32_t BUFFER_ELEMENT_COUNT = BUFFER_ELEMENTS;
-		//	} specializationData;
-		//	VkSpecializationMapEntry specializationMapEntry = vks::initializers::specializationMapEntry(0, 0, sizeof(uint32_t));
-		//	VkSpecializationInfo specializationInfo = vks::initializers::specializationInfo(1, &specializationMapEntry, sizeof(SpecializationData), &specializationData);
-
-		//	std::string shaderDir = "glsl";
-		//	if (commandLineParser.isSet("shaders")) {
-		//		shaderDir = commandLineParser.getValueAsString("shaders", "glsl");
-		//	}
-		//	const std::string shadersPath = getShaderBasePath() + shaderDir + "/computeheadless/";
-
-		//	VkPipelineShaderStageCreateInfo shaderStage = {};
-		//	shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		//	shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-		//	shaderStage.module = vks::tools::loadShader((shadersPath + "headless.comp.spv").c_str(), device);
-		//	shaderStage.pName = "main";
-		//	shaderStage.pSpecializationInfo = &specializationInfo;
-		//	shaderModule = shaderStage.module;
-
-		//	assert(shaderStage.module != VK_NULL_HANDLE);
-		//	computePipelineCreateInfo.stage = shaderStage;
-		//	VK_CHECK_RESULT(vkCreateComputePipelines(device, pipelineCache, 1, &computePipelineCreateInfo, nullptr, &pipeline));
-
-		//	// Create a command buffer for compute operations
-		//	VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-		//		vks::initializers::commandBufferAllocateInfo(commandPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
-		//	VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &commandBuffer));
-
-		//	// Fence for compute CB sync
-		//	VkFenceCreateInfo fenceCreateInfo = vks::initializers::fenceCreateInfo(VK_FENCE_CREATE_SIGNALED_BIT);
-		//	VK_CHECK_RESULT(vkCreateFence(device, &fenceCreateInfo, nullptr, &fence));
-		//}
-
-		///*
-		//	Command buffer creation (for compute work submission)
-		//*/
-		//{
-		//	VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-
-		//	VK_CHECK_RESULT(vkBeginCommandBuffer(commandBuffer, &cmdBufInfo));
-
-		//	// Barrier to ensure that input buffer transfer is finished before compute shader reads from it
-		//	VkBufferMemoryBarrier bufferBarrier = vks::initializers::bufferMemoryBarrier();
-		//	bufferBarrier.buffer = deviceBuffer;
-		//	bufferBarrier.size = VK_WHOLE_SIZE;
-		//	bufferBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-		//	bufferBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		//	bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		//	bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-		//	vkCmdPipelineBarrier(
-		//		commandBuffer,
-		//		VK_PIPELINE_STAGE_HOST_BIT,
-		//		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		//		VK_FLAGS_NONE,
-		//		0, nullptr,
-		//		1, &bufferBarrier,
-		//		0, nullptr);
-
-		//	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-		//	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &descriptorSet, 0, 0);
-
-		//	vkCmdDispatch(commandBuffer, BUFFER_ELEMENTS, 1, 1);
-
-		//	// Barrier to ensure that shader writes are finished before buffer is read back from GPU
-		//	bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		//	bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		//	bufferBarrier.buffer = deviceBuffer;
-		//	bufferBarrier.size = VK_WHOLE_SIZE;
-		//	bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		//	bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-		//	vkCmdPipelineBarrier(
-		//		commandBuffer,
-		//		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		//		VK_PIPELINE_STAGE_TRANSFER_BIT,
-		//		VK_FLAGS_NONE,
-		//		0, nullptr,
-		//		1, &bufferBarrier,
-		//		0, nullptr);
-
-		//	// Read back to host visible buffer
-		//	VkBufferCopy copyRegion = {};
-		//	copyRegion.size = bufferSize;
-		//	vkCmdCopyBuffer(commandBuffer, deviceBuffer, hostBuffer, 1, &copyRegion);
-
-		//	// Barrier to ensure that buffer copy is finished before host reading from it
-		//	bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		//	bufferBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-		//	bufferBarrier.buffer = hostBuffer;
-		//	bufferBarrier.size = VK_WHOLE_SIZE;
-		//	bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		//	bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-		//	vkCmdPipelineBarrier(
-		//		commandBuffer,
-		//		VK_PIPELINE_STAGE_TRANSFER_BIT,
-		//		VK_PIPELINE_STAGE_HOST_BIT,
-		//		VK_FLAGS_NONE,
-		//		0, nullptr,
-		//		1, &bufferBarrier,
-		//		0, nullptr);
-
-		//	VK_CHECK_RESULT(vkEndCommandBuffer(commandBuffer));
-
-		//	// Submit compute work
-		//	vkResetFences(device, 1, &fence);
-		//	const VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
-		//	VkSubmitInfo computeSubmitInfo = vks::initializers::submitInfo();
-		//	computeSubmitInfo.pWaitDstStageMask = &waitStageMask;
-		//	computeSubmitInfo.commandBufferCount = 1;
-		//	computeSubmitInfo.pCommandBuffers = &commandBuffer;
-		//	VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &computeSubmitInfo, fence));
-		//	VK_CHECK_RESULT(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
-
-		//	// Make device writes visible to the host
-		//	void* mapped;
-		//	vkMapMemory(device, hostMemory, 0, VK_WHOLE_SIZE, 0, &mapped);
-		//	VkMappedMemoryRange mappedRange = vks::initializers::mappedMemoryRange();
-		//	mappedRange.memory = hostMemory;
-		//	mappedRange.offset = 0;
-		//	mappedRange.size = VK_WHOLE_SIZE;
-		//	vkInvalidateMappedMemoryRanges(device, 1, &mappedRange);
-
-		//	// Copy to output
-		//	memcpy(computeOutput.data(), mapped, bufferSize);
-		//	vkUnmapMemory(device, hostMemory);
-		//}
-
-		//vkQueueWaitIdle(queue);
-
-		//// Output buffer contents
-		//LOG("Compute input:\n");
-		//for (auto v : computeInput) {
-		//	LOG("%d \t", v);
-		//}
-		//std::cout << std::endl;
-
-		//LOG("Compute output:\n");
-		//for (auto v : computeOutput) {
-		//	LOG("%d \t", v);
-		//}
-		//std::cout << std::endl;
-
-		//// Clean up
-		//vkDestroyBuffer(device, deviceBuffer, nullptr);
-		//vkFreeMemory(device, deviceMemory, nullptr);
-		//vkDestroyBuffer(device, hostBuffer, nullptr);
-		//vkFreeMemory(device, hostMemory, nullptr);
 	}
 
 	~VulkanExample()
 	{
 		destroyVulkan();
 		destroyWindow();
-//		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-//		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-//		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-//		vkDestroyPipeline(device, pipeline, nullptr);
-//		vkDestroyPipelineCache(device, pipelineCache, nullptr);
-//		vkDestroyFence(device, fence, nullptr);
-//		vkDestroyCommandPool(device, commandPool, nullptr);
-//		vkDestroyShaderModule(device, shaderModule, nullptr);
-//		vkDestroyDevice(device, nullptr);
-//#if DEBUG
-//		if (debugReportCallback) {
-//			PFN_vkDestroyDebugReportCallbackEXT vkDestroyDebugReportCallback = reinterpret_cast<PFN_vkDestroyDebugReportCallbackEXT>(vkGetInstanceProcAddr(instance, "vkDestroyDebugReportCallbackEXT"));
-//			assert(vkDestroyDebugReportCallback);
-//			vkDestroyDebugReportCallback(instance, debugReportCallback, nullptr);
-//		}
-//#endif
-//		vkDestroyInstance(instance, nullptr);
 	}
 };
 
@@ -1611,6 +1282,5 @@ int main(int argc, char* argv[]) {
 	VulkanExample* vulkanExample = new VulkanExample();
 	vulkanExample->Run();
 	delete(vulkanExample);
-	//system("pause");
 	return 0;
 }
