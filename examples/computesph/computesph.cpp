@@ -61,7 +61,6 @@ CommandLineParser commandLineParser;
 class VulkanExample
 {
 public:
-	GLFWwindow* window_ = NULL;
 	uint32_t windowHeight_ = 1000;
 	uint32_t windowWidth_ = 1000;
 	bool paused_ = false;
@@ -168,47 +167,6 @@ public:
 	const uint64_t pressureBufferOffset_ = densityBufferOffset_ + densityBufferSize_;
 
 	VkDebugReportCallbackEXT debugReportCallback{};
-
-	void InitializeWindow()
-	{
-		if (!glfwInit())
-		{
-			throw std::runtime_error("glfw initialization failed");
-		}
-		if (!glfwVulkanSupported())
-		{
-			throw std::runtime_error("failed to find the Vulkan loader");
-		}
-		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-		window_ = glfwCreateWindow(windowHeight_, windowWidth_, "", NULL, NULL);
-		if (!window_)
-		{
-			glfwTerminate();
-			throw std::runtime_error("window creation failed");
-		}
-		glfwMakeContextCurrent(window_);
-		glfwSwapInterval(0);
-
-		// pass Application pointer to the callback using GLFW user pointer
-		glfwSetWindowUserPointer(window_, reinterpret_cast<void*>(this));
-
-		// set key callback
-		auto key_callback = [](GLFWwindow* window, int key, int, int action, int)
-		{
-			auto app_ptr = reinterpret_cast<VulkanExample*>(glfwGetWindowUserPointer(window));
-			if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
-			{
-				app_ptr->paused_ = !app_ptr->paused_;
-			}
-			if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
-			{
-				glfwSetWindowShouldClose(window, GLFW_TRUE);
-			}
-		};
-
-		glfwSetKeyCallback(window_, key_callback);
-	}
 
 	void CreateSwapchain()
 	{
@@ -1020,7 +978,7 @@ public:
 			"frame #" << frameNumber_ << " | "
 			"render latency: " << 1e-6 * total_frame_time_ns << " ms | "
 			"FPS: " << 1.0 / (1e-9 * total_frame_time_ns);
-		glfwSetWindowTitle(window_, title.str().c_str());
+		glfwSetWindowTitle(GetGLFWWindow(), title.str().c_str());
 	}
 
 	void Run()
@@ -1035,7 +993,7 @@ public:
 			}
 		).detach();
 
-		while (!glfwWindowShouldClose(window_))
+		while (!glfwWindowShouldClose(GetGLFWWindow()))
 		{
 			MainLoop();
 		}
@@ -1043,7 +1001,7 @@ public:
 
 	void destroyWindow()
 	{
-		glfwDestroyWindow(window_);
+		glfwDestroyWindow(GetGLFWWindow());
 		glfwTerminate();
 	}
 
@@ -1058,7 +1016,8 @@ public:
 	VulkanExample()
 	{
 		LOG("Running headless compute example\n");
-		InitializeWindow();
+		static constexpr char* applicationName = "Vulkan Example";
+		InitializeWindow((int)windowWidth_, (int)windowHeight_, applicationName);
 
 		// CreateInstance
 		VkApplicationInfo vkAppInfo = CsySmallVk::applicationInfo();
@@ -1109,7 +1068,7 @@ public:
 		VK_CHECK_RESULT(vkCreateInstance(&instanceCreateInfo, NULL, &instance_));
 
 		// CreateSurface
-		if (glfwCreateWindowSurface(instance_, window_, NULL, &surface_) != VK_SUCCESS)
+		if (glfwCreateWindowSurface(instance_, GetGLFWWindow(), NULL, &surface_) != VK_SUCCESS)
 		{
 			throw std::runtime_error("surface creation failed");
 		}
