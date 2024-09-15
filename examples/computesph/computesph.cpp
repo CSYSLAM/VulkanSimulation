@@ -30,8 +30,6 @@
 #include <atomic>
 #include <thread>
 
-
-#define MU_SHADER_PATH "D:/cg/vulkan/csy_codehub/VulkanSimulation/shaders/glsl/computesph/"
 #define NUM_PARTICLES 20000
 #define WORK_GROUP_SIZE 128
 #define PARTICLE_RADIUS 0.005f
@@ -471,16 +469,6 @@ public:
 		std::cout << "Successfully create graphics pipeline layout" << std::endl;
 	}
 
-	VkShaderModule CreateShaderModule(const std::vector<char>& code)
-	{
-		VkShaderModule shaderModule;
-		VkShaderModuleCreateInfo createInfo = CsySmallVk::shaderModuleCreateInfo();
-		createInfo.codeSize = code.size();
-		createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-		VK_CHECK_RESULT(vkCreateShaderModule(device_, &createInfo, nullptr, &shaderModule));
-		return shaderModule;
-	}
-
 	void CreateGraphicsPipeline()
 	{
 		std::vector<VkPipelineShaderStageCreateInfo> shaderStageCreateInfos;
@@ -844,16 +832,12 @@ public:
 		VK_CHECK_RESULT(vkCreateComputePipelines(device_, globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[0]));
 
 		//second
-		auto computeForceShaderCode = CsySmallVk::readFile(MU_SHADER_PATH "compute_force.comp.spv");
-		VkShaderModule computeForceShaderModule = CreateShaderModule(computeForceShaderCode);
-		shaderStageCreateInfo.module = computeForceShaderModule;
+		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "compute_force.comp.spv").c_str(), device_);
 		createInfo.stage = shaderStageCreateInfo;
 		VK_CHECK_RESULT(vkCreateComputePipelines(device_, globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[1]));
 
 		//third
-		auto integrateShaderCode = CsySmallVk::readFile(MU_SHADER_PATH "integrate.comp.spv");
-		VkShaderModule integrateShaderModule = CreateShaderModule(integrateShaderCode);
-		shaderStageCreateInfo.module = integrateShaderModule;
+		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "integrate.comp.spv").c_str(), device_);
 		createInfo.stage = shaderStageCreateInfo;
 		VK_CHECK_RESULT(vkCreateComputePipelines(device_, globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[2]));
 		std::cout << "Successfully create compute pipelines" << std::endl;
