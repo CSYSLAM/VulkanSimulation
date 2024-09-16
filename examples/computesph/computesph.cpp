@@ -71,6 +71,8 @@ public:
 	VkPhysicalDevice physicalDevice_;
 	VkPhysicalDeviceFeatures physicalDeviceFeatures_;
 	VkPhysicalDeviceMemoryProperties physicalDeviceMemoryProperties_;
+	DeviceCsy* device;
+	SwapChainCsy* swapChain;
 	VkDevice device_;
 	uint32_t queueFamilyIndex_ = UINT32_MAX;
 	VkQueue presentationQueue_;
@@ -993,16 +995,10 @@ public:
 			}
 		).detach();
 
-		while (!glfwWindowShouldClose(GetGLFWWindow()))
+		while (!ShouldQuit())
 		{
 			MainLoop();
 		}
-	}
-
-	void destroyWindow()
-	{
-		glfwDestroyWindow(GetGLFWWindow());
-		glfwTerminate();
 	}
 
 	void destroyVulkan()
@@ -1019,132 +1015,33 @@ public:
 		static constexpr char* applicationName = "Vulkan Example";
 		InitializeWindow((int)windowWidth_, (int)windowHeight_, applicationName);
 
-		// CreateInstance
-		VkApplicationInfo vkAppInfo = CsySmallVk::applicationInfo();
-		vkAppInfo.pApplicationName = "SPH Simulation Vulkan";
-		vkAppInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 1);
-		vkAppInfo.pEngineName = "Csy SPH Simulation Engine";
-		vkAppInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-		vkAppInfo.apiVersion = VK_API_VERSION_1_3;
-
-		uint32_t instanceLayerCount;
-		vkEnumerateInstanceLayerProperties(&instanceLayerCount, NULL);
-		std::vector<VkLayerProperties> availableInstanceLayers(instanceLayerCount);
-		vkEnumerateInstanceLayerProperties(&instanceLayerCount, availableInstanceLayers.data());
-
-		std::cout << "[INFO] available vulkan layers:" << std::endl;
-		for (const auto& layer : availableInstanceLayers)
-		{
-			std::cout << "[INFO]     name: " << layer.layerName << " desc: " << layer.description << " impl_ver: "
-				<< VK_VERSION_MAJOR(layer.implementationVersion) << "."
-				<< VK_VERSION_MINOR(layer.implementationVersion) << "."
-				<< VK_VERSION_PATCH(layer.implementationVersion)
-				<< " spec_ver: "
-				<< VK_VERSION_MAJOR(layer.specVersion) << "."
-				<< VK_VERSION_MINOR(layer.specVersion) << "."
-				<< VK_VERSION_PATCH(layer.specVersion)
-				<< std::endl;
-		}
-
-		std::vector<VkExtensionProperties> availableInstanceExtensions = CsySmallVk::Query::instanceExtensionProperties();
-		for (const auto& extension : availableInstanceExtensions)
-		{
-			std::cout << "[INFO]     name: " << extension.extensionName << " spec_ver: "
-				<< VK_VERSION_MAJOR(extension.specVersion) << "."
-				<< VK_VERSION_MINOR(extension.specVersion) << "."
-				<< VK_VERSION_PATCH(extension.specVersion) << std::endl;
-		}
-
-		uint32_t glfwExtensionCount = 0;
-		const char** glfwExtensions;
-		glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-		std::vector<const char*> instanceExtensions(glfwExtensionCount);
-		std::memcpy(instanceExtensions.data(), glfwExtensions, sizeof(char*) * glfwExtensionCount);
-
-		VkInstanceCreateInfo instanceCreateInfo = CsySmallVk::instanceCreateInfo();
-		instanceCreateInfo.pApplicationInfo = &vkAppInfo;
-		instanceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(instanceExtensions.size());
-		instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions.data();
-		VK_CHECK_RESULT(vkCreateInstance(&instanceCreateInfo, NULL, &instance_));
+		unsigned int glfwExtensionCount = 0;
+		const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+		InstanceCsy* instance = new InstanceCsy(applicationName, glfwExtensionCount, glfwExtensions);
 
 		// CreateSurface
-		if (glfwCreateWindowSurface(instance_, GetGLFWWindow(), NULL, &surface_) != VK_SUCCESS)
-		{
-			throw std::runtime_error("surface creation failed");
-		}
+		VK_CHECK_RESULT(glfwCreateWindowSurface(instance->GetVkInstance(), GetGLFWWindow(), NULL, &surface_));
+		instance->PickPhysicalDevice({ VK_KHR_SWAPCHAIN_EXTENSION_NAME },
+				QueueFlagBit::GraphicsBit | QueueFlagBit::TransferBit | QueueFlagBit::ComputeBit | QueueFlagBit::PresentBit, surface_);
 
-		/*
-			Vulkan device creation
-		*/
-		// Physical device (always use first)
-		uint32_t deviceCount = 0;
-		VK_CHECK_RESULT(vkEnumeratePhysicalDevices(instance_, &deviceCount, nullptr));
-		std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
-		VK_CHECK_RESULT(vkEnumeratePhysicalDevices(instance_, &deviceCount, physicalDevices.data()));
-		physicalDevice_ = physicalDevices[0];
+		VkPhysicalDeviceFeatures deviceFeatures = {};
+		deviceFeatures.tessellationShader = VK_TRUE;
+		deviceFeatures.geometryShader = VK_TRUE;
+		deviceFeatures.fillModeNonSolid = VK_TRUE;
+		deviceFeatures.samplerAnisotropy = VK_TRUE;
+		device = instance->CreateDevice(QueueFlagBit::GraphicsBit | QueueFlagBit::TransferBit | QueueFlagBit::ComputeBit | QueueFlagBit::PresentBit, deviceFeatures);
 
-		// get this device properties
-		VkPhysicalDeviceProperties deviceProperties;
-		vkGetPhysicalDeviceProperties(physicalDevice_, &deviceProperties);
-		LOG("GPU: %s\n", deviceProperties.deviceName);
-
-		// get this device features
-		vkGetPhysicalDeviceFeatures(physicalDevice_, &physicalDeviceFeatures_);
-
-		// get this device properties
-		auto physicalDeviceExtensions = CsySmallVk::Query::deviceExtensionProperties(physicalDevice_);
-
-		// get memory properties
-		vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &physicalDeviceMemoryProperties_);
-
-		// Request queue
-		auto queueFamilies = CsySmallVk::Query::physicalDeviceQueueFamilyProperties(physicalDevice_);
-		// look for queue family indices
-		for (uint32_t index = 0; index < queueFamilies.size(); index++)
-		{
-			// try to search a queue family that contain graphics queue, compute queue, and presentation queue
-			// note: queue family index must be unique in the device queue create info
-			VkBool32 presentationSupport = false;
-			vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice_, index, surface_, &presentationSupport);
-			if (queueFamilies[index].queueCount > 0 && queueFamilies[index].queueFlags & VK_QUEUE_GRAPHICS_BIT && presentationSupport && queueFamilies[index].queueFlags & VK_QUEUE_COMPUTE_BIT)
-			{
-				queueFamilyIndex_ = index;
-			}
-		}
-		if (queueFamilyIndex_ == UINT32_MAX)
-		{
-			throw std::runtime_error("unable to find a family queue with graphics, presentation, and compute queue");
-		}
-
-		const float queuePriorities[3]{ 1, 1, 1 };
-		VkDeviceQueueCreateInfo queueCreateInfo = CsySmallVk::deviceQueueCreateInfo();
-		queueCreateInfo.queueCount = 3;
-		queueCreateInfo.pQueuePriorities = queuePriorities;
-		queueCreateInfo.queueFamilyIndex = queueFamilyIndex_;
-
-		const char* enabledExtensions = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
-		VkDeviceCreateInfo deviceCreateInfo = CsySmallVk::deviceCreateInfo();
-		deviceCreateInfo.enabledExtensionCount = 1;
-		deviceCreateInfo.ppEnabledExtensionNames = &enabledExtensions;
-		deviceCreateInfo.enabledLayerCount = 0;
-		deviceCreateInfo.ppEnabledLayerNames = nullptr;
-		deviceCreateInfo.pEnabledFeatures = nullptr;
-		deviceCreateInfo.queueCreateInfoCount = 1;
-		deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
-		VK_CHECK_RESULT(vkCreateDevice(physicalDevice_, &deviceCreateInfo, nullptr, &device_));
-
-		// Get a compute queue
-		vkGetDeviceQueue(device_, queueFamilyIndex_, 0, &graphicsQueue_);
-		vkGetDeviceQueue(device_, queueFamilyIndex_, 1, &computeQueue_);
-		vkGetDeviceQueue(device_, queueFamilyIndex_, 2, &presentationQueue_);
-
-		CreateSwapchain();
-
-		uint32_t swapchainImageCount;
-		vkGetSwapchainImagesKHR(device_, swapchain_, &swapchainImageCount, NULL);
-		swapchainImage_.resize(swapchainImageCount);
-		vkGetSwapchainImagesKHR(device_, swapchain_, &swapchainImageCount, swapchainImage_.data());
-		std::cout << "Successfully get swapchain image" << std::endl;
+		swapChain = device->CreateSwapChain(surface_, 1);
+		
+		// temp value 
+		instance_ = instance->GetVkInstance();
+		physicalDevice_ = instance->GetPhysicalDevice();
+		device_ = device->GetVkDevice();
+		queueFamilyIndex_ = device->GetQueueIndex(QueueFlags::Compute);
+		presentationQueue_ = graphicsQueue_ = computeQueue_ = device->GetQueue(QueueFlags::Compute);
+		surfaceFormat_ = swapChain->GetSurfaceFormat();
+		swapchain_ = swapChain->GetVkSwapChain();
+		swapchainImage_ = swapChain->GetVkImages();
 
 		CreateSwapchainImageViews();
 		CreateRenderPass();
@@ -1169,7 +1066,7 @@ public:
 	~VulkanExample()
 	{
 		destroyVulkan();
-		destroyWindow();
+		DestroyWindow();
 	}
 };
 

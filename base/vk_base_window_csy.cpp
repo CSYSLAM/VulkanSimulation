@@ -1,16 +1,15 @@
-#pragma once
-
-#include <glfw/glfw3.h>
-#include <iostream>
 #include <stdio.h>
+#include "vk_base_window_csy.h"
 
-struct GLFWwindow;
-struct GLFWwindow* GetGLFWWindow();
+namespace {
+    GLFWwindow* window = nullptr;
+}
 
-GLFWwindow* window = nullptr;
+
 GLFWwindow* GetGLFWWindow() {
     return window;
 }
+
 
 void InitializeWindow(int width, int height, const char* name) {
     if (!glfwInit()) {
@@ -18,7 +17,7 @@ void InitializeWindow(int width, int height, const char* name) {
         exit(EXIT_FAILURE);
     }
 
-    if (!glfwVulkanSupported()) {
+    if (!glfwVulkanSupported()){
         fprintf(stderr, "Vulkan not supported\n");
         exit(EXIT_FAILURE);
     }
@@ -34,9 +33,11 @@ void InitializeWindow(int width, int height, const char* name) {
     }
 }
 
+
 bool ShouldQuit() {
     return !!glfwWindowShouldClose(window);
 }
+
 
 void DestroyWindow() {
     glfwDestroyWindow(window);
