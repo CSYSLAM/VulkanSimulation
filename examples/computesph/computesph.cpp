@@ -19,8 +19,8 @@
 #include <algorithm>
 
 #include <vulkan/vulkan.h>
-#include "VulkanTools.h"
 #include "CommandLineParser.hpp"
+#include "vk_base_bufferUtils_csy.h"
 
 #include "vkcsy.h"
 #include <glfw/glfw3.h>
@@ -168,81 +168,44 @@ public:
 		swapchainImageView_.resize(swapchainImage.size());
 		for (uint32_t i = 0; i < swapchainImageView_.size(); i++)
 		{
-			VkImageViewCreateInfo imageViewCreateInfo
-			{
-				VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-				NULL,
-				0,
-				swapchainImage[i],
-				VK_IMAGE_VIEW_TYPE_2D,
-				swapChain->GetSurfaceFormat().format,
-				{
-					VK_COMPONENT_SWIZZLE_IDENTITY, // r
-					VK_COMPONENT_SWIZZLE_IDENTITY, // g
-					VK_COMPONENT_SWIZZLE_IDENTITY, // b
-					VK_COMPONENT_SWIZZLE_IDENTITY // a
-				},
-				{
-					VK_IMAGE_ASPECT_COLOR_BIT, // aspectMask
-					0, // baseMipLevel
-					1, // levelCount
-					0, // baseArrayLayer
-					1, // layerCount
-				}
-			};
-			VK_CHECK_RESULT(vkCreateImageView(device->GetVkDevice(), &imageViewCreateInfo, NULL, &swapchainImageView_[i]));
+			VkImageViewCreateInfo view = vks::initializers::imageViewCreateInfo();
+			view.image = VK_NULL_HANDLE;
+			view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			view.format = swapChain->GetSurfaceFormat().format;
+			view.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+			view.image = swapchainImage[i];
+			VK_CHECK_RESULT(vkCreateImageView(device->GetVkDevice(), &view, NULL, &swapchainImageView_[i]));
 		}
 		std::cout << "Successfully create swapchain ImageViews" << std::endl;
 	}
 
 	void CreateRenderPass()
 	{
-		VkAttachmentDescription attachmentDescription
-		{
-			0,
-			swapChain->GetSurfaceFormat().format,
-			VK_SAMPLE_COUNT_1_BIT,
-			VK_ATTACHMENT_LOAD_OP_CLEAR,
-			VK_ATTACHMENT_STORE_OP_STORE,
-			VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-			VK_ATTACHMENT_STORE_OP_DONT_CARE,
-			VK_IMAGE_LAYOUT_UNDEFINED,
-			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
-		};
+		VkAttachmentDescription attachmentDescription{};
+		attachmentDescription.format = swapChain->GetSurfaceFormat().format;
+		attachmentDescription.samples = VK_SAMPLE_COUNT_1_BIT;
+		attachmentDescription.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;	// Clear depth at beginning of the render pass
+		attachmentDescription.storeOp = VK_ATTACHMENT_STORE_OP_STORE;	// We will read from depth, so it's important to store the depth attachment results
+		attachmentDescription.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		attachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		attachmentDescription.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;					// We don't care about initial layout of the attachment
+		attachmentDescription.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-		VkAttachmentReference colorAttachmentReference
-		{
-			0,
-			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-		};
+		VkAttachmentReference colorAttachmentReference = {};
+		colorAttachmentReference.attachment = 0;
+		colorAttachmentReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-		VkSubpassDescription subpassDescription
-		{
-			0,
-			VK_PIPELINE_BIND_POINT_GRAPHICS,
-			0,
-			NULL,
-			1,
-			&colorAttachmentReference,
-			NULL,
-			NULL,
-			0,
-			NULL
-		};
+		VkSubpassDescription subpassDescription = {};
+		subpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpassDescription.pColorAttachments = &colorAttachmentReference;
+		subpassDescription.colorAttachmentCount = 1;
 
-		VkRenderPassCreateInfo renderPassCreateInfo
-		{
-			VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-			NULL,
-			0,
-			1,
-			&attachmentDescription,
-			1,
-			&subpassDescription,
-			0,
-			NULL
-		};
-		VK_CHECK_RESULT(vkCreateRenderPass(device->GetVkDevice(), &renderPassCreateInfo, NULL, &renderPass_));
+		VkRenderPassCreateInfo renderPassCreateInfo = vks::initializers::renderPassCreateInfo();
+		renderPassCreateInfo.attachmentCount = 1;
+		renderPassCreateInfo.pAttachments = &attachmentDescription;
+		renderPassCreateInfo.subpassCount = 1;
+		renderPassCreateInfo.pSubpasses = &subpassDescription;
+		VK_CHECK_RESULT(vkCreateRenderPass(device->GetVkDevice(), &renderPassCreateInfo, nullptr, &renderPass_));
 		std::cout << "Successfully create render pass" << std::endl;
 	}
 
@@ -251,55 +214,33 @@ public:
 		swapchainFrameBuffer_.resize(swapchainImageView_.size());
 		for (size_t index = 0; index < swapchainImageView_.size(); index++)
 		{
-			VkFramebufferCreateInfo framebufferCreateInfo
-			{
-				VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-				NULL,
-				0,
-				renderPass_,
-				1,
-				&swapchainImageView_[index],
-				windowWidth_,
-				windowHeight_,
-				1
-			};
-			VK_CHECK_RESULT(vkCreateFramebuffer(device->GetVkDevice(), &framebufferCreateInfo, NULL, &swapchainFrameBuffer_[index]));
+			VkFramebufferCreateInfo fbufCreateInfo = vks::initializers::framebufferCreateInfo();
+			fbufCreateInfo.renderPass = renderPass_;
+			fbufCreateInfo.attachmentCount = 1;
+			fbufCreateInfo.pAttachments = &swapchainImageView_[index];
+			fbufCreateInfo.width = windowWidth_;
+			fbufCreateInfo.height = windowHeight_;
+			fbufCreateInfo.layers = 1;
+			VK_CHECK_RESULT(vkCreateFramebuffer(device->GetVkDevice(), &fbufCreateInfo, nullptr, &swapchainFrameBuffer_[index]));
 		}
 		std::cout << "Successfully create swapchain framebuffers" << std::endl;
 	}
 
 	void CreatePipelineCache()
 	{
-		VkPipelineCacheCreateInfo pipelineCacheCreateInfo
-		{
-			VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
-			NULL,
-			0,
-			0,
-			NULL
-		};
+		VkPipelineCacheCreateInfo pipelineCacheCreateInfo = {};
+		pipelineCacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
 		VK_CHECK_RESULT(vkCreatePipelineCache(device->GetVkDevice(), &pipelineCacheCreateInfo, NULL, &globalPipelineCache_));
 		std::cout << "Successfully create pipelineCache" << std::endl;
 	}
 
 	void CreateDescriptorPool()
 	{
-		VkDescriptorPoolSize descriptorPoolSize
-		{
-			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-			5
+		std::vector<VkDescriptorPoolSize> poolSizes = {
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 5),
 		};
-
-		VkDescriptorPoolCreateInfo descriptorPoolCreateInfo
-		{
-			VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-			NULL,
-			0,
-			1,
-			1,
-			&descriptorPoolSize
-		};
-		VK_CHECK_RESULT(vkCreateDescriptorPool(device->GetVkDevice(), &descriptorPoolCreateInfo, NULL, &globalDescriptorPool_));
+		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 1);
+		VK_CHECK_RESULT(vkCreateDescriptorPool(device->GetVkDevice(), &descriptorPoolInfo, NULL, &globalDescriptorPool_));
 		std::cout << "Successfully create descriptor pool" << std::endl;
 	}
 
@@ -319,37 +260,15 @@ public:
 
 	void CreateBuffers()
 	{
-		VkBufferCreateInfo particlesBufferCreateInfo = CsySmallVk::bufferCreateInfo();
-		particlesBufferCreateInfo.size = bufferSize_;
-		particlesBufferCreateInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-		particlesBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		particlesBufferCreateInfo.queueFamilyIndexCount = 0;
-		particlesBufferCreateInfo.pQueueFamilyIndices = nullptr;
-		vkCreateBuffer(device->GetVkDevice(), &particlesBufferCreateInfo, NULL, &particlesBuffer_);
-
-		VkMemoryRequirements positionBufferMemoryRequirements = CsySmallVk::Query::memoryRequirements(device->GetVkDevice(), particlesBuffer_);
-		VkMemoryAllocateInfo particleBufferMemoryAllocationInfo = CsySmallVk::memoryAllocateInfo();
-		particleBufferMemoryAllocationInfo.allocationSize = positionBufferMemoryRequirements.size;
-		particleBufferMemoryAllocationInfo.memoryTypeIndex = findMemoryType(positionBufferMemoryRequirements,
-			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-		VK_CHECK_RESULT(vkAllocateMemory(device->GetVkDevice(), &particleBufferMemoryAllocationInfo, NULL, &packedParticlesMemory_));
-		// bind the memory to the buffer object
-		vkBindBufferMemory(device->GetVkDevice(), particlesBuffer_, packedParticlesMemory_, 0);
+		VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+		BufferUtilsCsy::CreateBuffer(device, bufferSize_, usage, properties, particlesBuffer_, packedParticlesMemory_);
 		std::cout << "Successfully create buffers" << std::endl;
 	}
 
 	void CreateGraphicsPipelineLayout()
 	{
-		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo
-		{
-			VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-			NULL,
-			0,
-			0,
-			NULL,
-			0,
-			NULL
-		};
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(nullptr, 0);
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device->GetVkDevice(), &pipelineLayoutCreateInfo, NULL, &graphicsPipelineLayout_));
 		std::cout << "Successfully create graphics pipeline layout" << std::endl;
 	}
@@ -371,146 +290,52 @@ public:
 		shaderStageCreateInfos.push_back(vertexShaderStageCreateInfo);
 		shaderStageCreateInfos.push_back(fragmentShaderStageCreateInfo);
 
-		VkVertexInputBindingDescription vertexInputBindingDescription
-		{
-			0,
-			sizeof(glm::vec2),
-			VK_VERTEX_INPUT_RATE_VERTEX
-		};
+
+		VkVertexInputBindingDescription vertexInputBindingDescription =
+			vks::initializers::vertexInputBindingDescription(0, sizeof(glm::vec2), VK_VERTEX_INPUT_RATE_VERTEX);
 
 		// layout(location = 0) in vec2 position;
-		VkVertexInputAttributeDescription vertexInputAttributeDescription
-		{
-			0,
-			0,
-			VK_FORMAT_R32G32_SFLOAT,
-			0
-		};
+		VkVertexInputAttributeDescription vertexInputAttributeDescription =
+			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32_SFLOAT, 0);
 
-		VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo
-		{
-			VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-			NULL,
-			0,
-			1,
-			&vertexInputBindingDescription,
-			1,
-			&vertexInputAttributeDescription
-		};
+		VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo = vks::initializers::pipelineVertexInputStateCreateInfo();
+		vertexInputStateCreateInfo.vertexBindingDescriptionCount = 1;
+		vertexInputStateCreateInfo.pVertexBindingDescriptions = &vertexInputBindingDescription;
+		vertexInputStateCreateInfo.vertexAttributeDescriptionCount = 1;
+		vertexInputStateCreateInfo.pVertexAttributeDescriptions = &vertexInputAttributeDescription;
 
-		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo
-		{
-			VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-			NULL,
-			0,
-			VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
-			VK_FALSE
-		};
+		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo =
+				vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_POINT_LIST, 0, VK_FALSE);
 
-		VkViewport viewport
-		{
-			0,
-			0,
-			static_cast<float>(windowWidth_),
-			static_cast<float>(windowHeight_),
-			0,
-			1
-		};
+		VkViewport viewport = vks::initializers::viewport(static_cast<float>(windowWidth_), static_cast<float>(windowHeight_), 0.0f, 1.0f);
+		VkRect2D scissor = vks::initializers::rect2D(windowWidth_, windowHeight_, 0, 0);
 
-		VkRect2D scissor
-		{
-			{ 0, 0 },
-			{ windowWidth_, windowHeight_ }
-		};
+		VkPipelineViewportStateCreateInfo viewportStateCreateInfo = {};
+		viewportStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		viewportStateCreateInfo.viewportCount = 1;
+		viewportStateCreateInfo.pViewports = &viewport;
+		viewportStateCreateInfo.scissorCount = 1;
+		viewportStateCreateInfo.pScissors = &scissor;
 
-		VkPipelineViewportStateCreateInfo viewportStateCreateInfo
-		{
-			VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-			NULL,
-			0,
-			1,
-			&viewport,
-			1,
-			&scissor
-		};
-
-		VkPipelineRasterizationStateCreateInfo rasterizationStateCreateInfo
-		{
-			VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-			NULL,
-			0,
-			VK_FALSE,
-			VK_FALSE,
-			VK_POLYGON_MODE_FILL,
-			VK_CULL_MODE_NONE,
-			VK_FRONT_FACE_COUNTER_CLOCKWISE,
-			VK_FALSE,
-			0,
-			0,
-			0,
-			1
-		};
-
-		VkPipelineMultisampleStateCreateInfo multisampleStateCreateInfo
-		{
-			VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-			NULL,
-			0,
-			VK_SAMPLE_COUNT_1_BIT,
-			VK_FALSE,
-			0,
-			NULL,
-			VK_FALSE,
-			VK_FALSE
-		};
-
-		VkPipelineColorBlendAttachmentState colorBlendAttachment
-		{
-			VK_FALSE,
-			VK_BLEND_FACTOR_ONE,
-			VK_BLEND_FACTOR_ZERO,
-			VK_BLEND_OP_ADD,
-			VK_BLEND_FACTOR_ONE,
-			VK_BLEND_FACTOR_ZERO,
-			VK_BLEND_OP_ADD,
-			VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
-		};
-
-		VkPipelineColorBlendStateCreateInfo colorBlendStateCreateInfo
-		{
-			VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-			NULL,
-			0,
-			VK_FALSE,
-			VK_LOGIC_OP_COPY,
-			1,
-			&colorBlendAttachment,
-			{0, 0, 0, 0}
-		};
-
-		VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo
-		{
-			VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-			NULL,
-			0,
-			static_cast<uint32_t>(shaderStageCreateInfos.size()),
-			shaderStageCreateInfos.data(),
-			&vertexInputStateCreateInfo,
-			&inputAssemblyStateCreateInfo,
-			NULL,
-			&viewportStateCreateInfo,
-			&rasterizationStateCreateInfo,
-			&multisampleStateCreateInfo,
-			NULL,
-			&colorBlendStateCreateInfo,
-			NULL,
-			graphicsPipelineLayout_,
-			renderPass_,
-			0,
-			VK_NULL_HANDLE,
-			-1
-		};
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device->GetVkDevice(), globalPipelineCache_, 1, &graphicsPipelineCreateInfo, NULL, &graphicsPipeline_));
+		VkPipelineRasterizationStateCreateInfo rasterizationStateCreateInfo =
+			vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
+		VkPipelineMultisampleStateCreateInfo multisampleStateCreateInfo =
+				vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT, 0);
+		VkPipelineColorBlendAttachmentState colorBlendAttachment = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+		VkPipelineColorBlendStateCreateInfo colorBlendStateCreateInfo = vks::initializers::pipelineColorBlendStateCreateInfo(1, &colorBlendAttachment);
+		
+		VkGraphicsPipelineCreateInfo pipelineCreateInfo = vks::initializers::pipelineCreateInfo(graphicsPipelineLayout_, renderPass_);
+		pipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
+		pipelineCreateInfo.pInputAssemblyState = &inputAssemblyStateCreateInfo;
+		pipelineCreateInfo.pRasterizationState = &rasterizationStateCreateInfo;
+		pipelineCreateInfo.pColorBlendState = &colorBlendStateCreateInfo;
+		pipelineCreateInfo.pMultisampleState = &multisampleStateCreateInfo;
+		pipelineCreateInfo.pViewportState = nullptr;
+		pipelineCreateInfo.pDepthStencilState = nullptr;
+		pipelineCreateInfo.pDynamicState = nullptr;
+		pipelineCreateInfo.stageCount = static_cast<uint32_t>(shaderStageCreateInfos.size());
+		pipelineCreateInfo.pStages = shaderStageCreateInfos.data();
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device->GetVkDevice(), globalPipelineCache_, 1, &pipelineCreateInfo, NULL, &graphicsPipeline_));
 		std::cout << "Successfully create graphics pipeline" << std::endl;
 	}
 
@@ -525,69 +350,41 @@ public:
 	void CreateGraphicsCommandBuffers()
 	{
 		graphicsCommandBuffer_.resize(swapchainFrameBuffer_.size());
-		VkCommandBufferAllocateInfo graphicsCommandBufferAllocationInfo
-		{
-			VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-			NULL,
-			graphicsCommandPool_,
-			VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-			static_cast<uint32_t>(graphicsCommandBuffer_.size())
-		};
+		VkCommandBufferAllocateInfo graphicsCommandBufferAllocationInfo =
+				vks::initializers::commandBufferAllocateInfo(graphicsCommandPool_, VK_COMMAND_BUFFER_LEVEL_PRIMARY, static_cast<uint32_t>(graphicsCommandBuffer_.size()));
 		VK_CHECK_RESULT(vkAllocateCommandBuffers(device->GetVkDevice(), &graphicsCommandBufferAllocationInfo, graphicsCommandBuffer_.data()));
+		
+		VkClearValue clearValues{ 0.92f, 0.92f, 0.92f, 1.0f };
+		VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
+		renderPassBeginInfo.renderPass = renderPass_;
+		renderPassBeginInfo.renderArea.offset.x = 0;
+		renderPassBeginInfo.renderArea.offset.y = 0;
+		renderPassBeginInfo.renderArea.extent.width = windowWidth_;
+		renderPassBeginInfo.renderArea.extent.height = windowHeight_;
+		renderPassBeginInfo.clearValueCount = 1;
+		renderPassBeginInfo.pClearValues = &clearValues;
+
 		for (size_t i = 0; i < graphicsCommandBuffer_.size(); i++)
 		{
-			VkCommandBufferBeginInfo commandBufferBeginInfo
-			{
-				VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-				NULL,
-				VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT,
-				NULL
-			};
+			VkCommandBufferBeginInfo commandBufferBeginInfo = vks::initializers::commandBufferBeginInfo();
 			vkBeginCommandBuffer(graphicsCommandBuffer_[i], &commandBufferBeginInfo);
-			VkClearValue clear_value{ 0.92f, 0.92f, 0.92f, 1.0f };
-			VkRenderPassBeginInfo renderPassBeginInfo
-			{
-				VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-				NULL,
-				renderPass_,
-				swapchainFrameBuffer_[i],
-				{
-					{ 0, 0 },
-					{ windowWidth_, windowHeight_ }
-				},
-				1,
-				&clear_value
-			};
+
+			renderPassBeginInfo.framebuffer = swapchainFrameBuffer_[i];
 			vkCmdBeginRenderPass(graphicsCommandBuffer_[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-			VkViewport viewport
-			{
-				0,
-				0,
-				static_cast<float>(windowWidth_),
-				static_cast<float>(windowHeight_),
-				0,
-				1
-			};
 
-			VkRect2D scissor
-			{
-				{ 0, 0 },
-				{ windowWidth_, windowHeight_ }
-			};
-
+			VkViewport viewport = vks::initializers::viewport((float)windowWidth_, (float)windowHeight_, 0.0f, 1.0f);
 			vkCmdSetViewport(graphicsCommandBuffer_[i], 0, 1, &viewport);
+
+			VkRect2D scissor = vks::initializers::rect2D(windowWidth_, windowHeight_, 0, 0);
 			vkCmdSetScissor(graphicsCommandBuffer_[i], 0, 1, &scissor);
+
 			vkCmdBindPipeline(graphicsCommandBuffer_[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline_);
 
 			VkDeviceSize offsets = 0;
 			vkCmdBindVertexBuffers(graphicsCommandBuffer_[i], 0, 1, &particlesBuffer_, &offsets);
 			vkCmdDraw(graphicsCommandBuffer_[i], NUM_PARTICLES, 1, 0, 0);
 			vkCmdEndRenderPass(graphicsCommandBuffer_[i]);
-
-			if (vkEndCommandBuffer(graphicsCommandBuffer_[i]) != VK_SUCCESS)
-			{
-				throw std::runtime_error("command buffer creation failed");
-			}
+			VK_CHECK_RESULT(vkEndCommandBuffer(graphicsCommandBuffer_[i]));
 		}
 		std::cout << "Successfully create graphics command buffers" << std::endl;
 	}
