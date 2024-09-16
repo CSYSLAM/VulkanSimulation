@@ -391,12 +391,7 @@ public:
 
 	void CreateSemaphores()
 	{
-		VkSemaphoreCreateInfo semaphoreCreateInfo
-		{
-			VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-			NULL,
-			0
-		};
+		VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
 		VK_CHECK_RESULT(vkCreateSemaphore(device->GetVkDevice(), &semaphoreCreateInfo, NULL, &imageAvailableSemaphore_));
 		VK_CHECK_RESULT(vkCreateSemaphore(device->GetVkDevice(), &semaphoreCreateInfo, NULL, &renderFinishedSemaphore_));
 		std::cout << "Successfully create semaphores" << std::endl;
@@ -404,54 +399,23 @@ public:
 
 	void CreateComputeDescriptorSetLayout()
 	{
-		VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[5];
-		descriptorSetLayoutBindings[0].binding = 0;
-		descriptorSetLayoutBindings[0].descriptorCount = 1;
-		descriptorSetLayoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		descriptorSetLayoutBindings[0].pImmutableSamplers = nullptr;
-		descriptorSetLayoutBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-		descriptorSetLayoutBindings[1].binding = 1;
-		descriptorSetLayoutBindings[1].descriptorCount = 1;
-		descriptorSetLayoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		descriptorSetLayoutBindings[1].pImmutableSamplers = nullptr;
-		descriptorSetLayoutBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-		descriptorSetLayoutBindings[2].binding = 2;
-		descriptorSetLayoutBindings[2].descriptorCount = 1;
-		descriptorSetLayoutBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		descriptorSetLayoutBindings[2].pImmutableSamplers = nullptr;
-		descriptorSetLayoutBindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-		descriptorSetLayoutBindings[3].binding = 3;
-		descriptorSetLayoutBindings[3].descriptorCount = 1;
-		descriptorSetLayoutBindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		descriptorSetLayoutBindings[3].pImmutableSamplers = nullptr;
-		descriptorSetLayoutBindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-		descriptorSetLayoutBindings[4].binding = 4;
-		descriptorSetLayoutBindings[4].descriptorCount = 1;
-		descriptorSetLayoutBindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		descriptorSetLayoutBindings[4].pImmutableSamplers = nullptr;
-		descriptorSetLayoutBindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = CsySmallVk::descriptorSetLayoutCreateInfo();
-		descriptorSetLayoutCreateInfo.bindingCount = 5;
-		descriptorSetLayoutCreateInfo.pBindings = descriptorSetLayoutBindings;
-		if (vkCreateDescriptorSetLayout(device->GetVkDevice(), &descriptorSetLayoutCreateInfo, NULL, &computeDescriptorSetLayout_) != VK_SUCCESS)
-		{
-			throw std::runtime_error("compute descriptor layout creation failed");
-		}
+		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 0),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 2),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 3),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 4),
+		};
+		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device->GetVkDevice(), &descriptorSetLayoutCreateInfo, NULL, &computeDescriptorSetLayout_));
 		std::cout << "Successfully create compute descriptorSet layout" << std::endl;
 	}
 
 	void UpdateComputeDescriptorSets()
 	{
 		// allocate descriptor sets
-		VkDescriptorSetAllocateInfo allocInfo = CsySmallVk::descriptorSetAllocateInfo();
-		allocInfo.descriptorPool = globalDescriptorPool_;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &computeDescriptorSetLayout_;
-		if (vkAllocateDescriptorSets(device->GetVkDevice(), &allocInfo, &computeDescriptorSet_) != VK_SUCCESS)
-		{
-			throw std::runtime_error("compute descriptor set allocation failed");
-		}
+		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(globalDescriptorPool_, &computeDescriptorSetLayout_, 1);
+		VK_CHECK_RESULT(vkAllocateDescriptorSets(device->GetVkDevice(), &allocInfo, &computeDescriptorSet_));
 
 		VkDescriptorBufferInfo descriptorBufferInfos[5];
 		descriptorBufferInfos[0].buffer = particlesBuffer_;
@@ -474,27 +438,18 @@ public:
 		VkWriteDescriptorSet writeDescriptorSets[5];
 		for (int index = 0; index < 5; index++)
 		{
-			VkWriteDescriptorSet write = CsySmallVk::writeDescriptorSet();
-			write.descriptorCount = 1;
-			write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			write.dstBinding = index;
-			write.dstArrayElement = 0;
-			write.dstSet = computeDescriptorSet_;
-			write.pBufferInfo = &descriptorBufferInfos[index];
+			VkWriteDescriptorSet write =
+				vks::initializers::writeDescriptorSet(computeDescriptorSet_, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, index, & descriptorBufferInfos[index]);
 			writeDescriptorSets[index] = write;
 		}
-
 		vkUpdateDescriptorSets(device->GetVkDevice(), 5, writeDescriptorSets, 0, NULL);
 		std::cout << "Successfully update compute descriptorsets" << std::endl;
 	}
 
 	void CreateComputePipelineLayout()
 	{
-		VkPipelineLayoutCreateInfo layoutCreateInfo = CsySmallVk::pipelineLayoutCreateInfo();
-		layoutCreateInfo.setLayoutCount = 1;
-		layoutCreateInfo.pSetLayouts = &computeDescriptorSetLayout_;
-		layoutCreateInfo.pushConstantRangeCount = 0;
-		layoutCreateInfo.pPushConstantRanges = nullptr;
+		VkPipelineLayoutCreateInfo layoutCreateInfo =
+			vks::initializers::pipelineLayoutCreateInfo(&computeDescriptorSetLayout_, 1);
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device->GetVkDevice(), &layoutCreateInfo, nullptr, &computePipelineLayout_));
 		std::cout << "Successfully create compute pipeline layout" << std::endl;
 	}
@@ -506,11 +461,8 @@ public:
 		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "compute_density_pressure.comp.spv").c_str(), device->GetVkDevice());
 		shaderStageCreateInfo.pName = "main";
 
-		VkComputePipelineCreateInfo createInfo = CsySmallVk::computePipelineCreateInfo();
-		createInfo.basePipelineHandle = VK_NULL_HANDLE;
-		createInfo.basePipelineIndex = 0;
+		VkComputePipelineCreateInfo createInfo = vks::initializers::computePipelineCreateInfo(computePipelineLayout_, 0);
 		createInfo.stage = shaderStageCreateInfo;
-		createInfo.layout = computePipelineLayout_;
 		VK_CHECK_RESULT(vkCreateComputePipelines(device->GetVkDevice(), globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[0]));
 
 		//second
@@ -536,15 +488,11 @@ public:
 
 	void CreateComputeCommandBuffer()
 	{
-		VkCommandBufferAllocateInfo allocInfo = CsySmallVk::commandBufferAllocateInfo();
-		allocInfo.commandBufferCount = 1;
-		allocInfo.commandPool = computeCommandPool_;
-		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		if (vkAllocateCommandBuffers(device->GetVkDevice(), &allocInfo, &computeCommandBuffer_) != VK_SUCCESS)
-		{
-			throw std::runtime_error("buffer allocation failed");
-		}
-		VkCommandBufferBeginInfo beginInfo = CsySmallVk::commandBufferBeginInfo();
+		VkCommandBufferAllocateInfo allocInfo =
+				vks::initializers::commandBufferAllocateInfo(computeCommandPool_, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
+		VK_CHECK_RESULT(vkAllocateCommandBuffers(device->GetVkDevice(), &allocInfo, &computeCommandBuffer_));
+
+		VkCommandBufferBeginInfo beginInfo = vks::initializers::commandBufferBeginInfo();
 		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 		VK_CHECK_RESULT(vkBeginCommandBuffer(computeCommandBuffer_, &beginInfo));
 		vkCmdBindDescriptorSets(computeCommandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout_, 0, 1, &computeDescriptorSet_, 0, NULL);
@@ -573,6 +521,47 @@ public:
 		vkEndCommandBuffer(computeCommandBuffer_);
 		std::cout << "Successfully create compute command buffer" << std::endl;
 	}
+
+	//void SetInitialParticleData()
+	//{
+	//	// Set the initial particles data
+	//	std::vector<glm::vec2> initialParticlePosition(NUM_PARTICLES);
+	//	for (auto i = 0, x = 0, y = 0; i < NUM_PARTICLES; i++)
+	//	{
+	//		initialParticlePosition[i].x = -0.625f + PARTICLE_RADIUS * 2 * x;
+	//		initialParticlePosition[i].y = -1 + PARTICLE_RADIUS * 2 * y;
+	//		x++;
+	//		if (x >= 125)
+	//		{
+	//			x = 0;
+	//			y++;
+	//		}
+	//	}
+
+	//	VkDeviceSize bufferSize = sizeof(glm::vec2) * NUM_PARTICLES;
+
+	//	// Create staging buffer using BufferUtils::CreateBufferFromData
+	//	VkBuffer stagingBuffer;
+	//	VkDeviceMemory stagingBufferMemory;
+	//	BufferUtilsCsy::CreateBufferFromData(
+	//		device,
+	//		computeCommandPool_,
+	//		initialParticlePosition.data(),
+	//		bufferSize,
+	//		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+	//		stagingBuffer,
+	//		stagingBufferMemory
+	//	);
+
+	//	// Copy data from staging buffer to particles buffer
+	//	BufferUtilsCsy::CopyBuffer(device, computeCommandPool_, stagingBuffer, particlesBuffer_, bufferSize);
+
+	//	// Clean up staging buffer
+	//	vkDestroyBuffer(device->GetVkDevice(), stagingBuffer, nullptr);
+	//	vkFreeMemory(device->GetVkDevice(), stagingBufferMemory, nullptr);
+
+	//	std::cout << "Successfully set initial particle data" << std::endl;
+	//}
 
 	void SetInitialParticleData()
 	{
