@@ -96,19 +96,6 @@ public:
 	uint32_t imageIndex_;
 	VkPipelineStageFlags wait_dst_stage_mask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
-	VkSubmitInfo computeSubmitInfo_
-	{
-		VK_STRUCTURE_TYPE_SUBMIT_INFO,
-		NULL,
-		0,
-		NULL,
-		0,
-		1,
-		&computeCommandBuffer_,
-		0,
-		NULL
-	};
-
 	VkSubmitInfo graphicsSubmitInfo_
 	{
 		VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -522,47 +509,6 @@ public:
 		std::cout << "Successfully create compute command buffer" << std::endl;
 	}
 
-	//void SetInitialParticleData()
-	//{
-	//	// Set the initial particles data
-	//	std::vector<glm::vec2> initialParticlePosition(NUM_PARTICLES);
-	//	for (auto i = 0, x = 0, y = 0; i < NUM_PARTICLES; i++)
-	//	{
-	//		initialParticlePosition[i].x = -0.625f + PARTICLE_RADIUS * 2 * x;
-	//		initialParticlePosition[i].y = -1 + PARTICLE_RADIUS * 2 * y;
-	//		x++;
-	//		if (x >= 125)
-	//		{
-	//			x = 0;
-	//			y++;
-	//		}
-	//	}
-
-	//	VkDeviceSize bufferSize = sizeof(glm::vec2) * NUM_PARTICLES;
-
-	//	// Create staging buffer using BufferUtils::CreateBufferFromData
-	//	VkBuffer stagingBuffer;
-	//	VkDeviceMemory stagingBufferMemory;
-	//	BufferUtilsCsy::CreateBufferFromData(
-	//		device,
-	//		computeCommandPool_,
-	//		initialParticlePosition.data(),
-	//		bufferSize,
-	//		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-	//		stagingBuffer,
-	//		stagingBufferMemory
-	//	);
-
-	//	// Copy data from staging buffer to particles buffer
-	//	BufferUtilsCsy::CopyBuffer(device, computeCommandPool_, stagingBuffer, particlesBuffer_, bufferSize);
-
-	//	// Clean up staging buffer
-	//	vkDestroyBuffer(device->GetVkDevice(), stagingBuffer, nullptr);
-	//	vkFreeMemory(device->GetVkDevice(), stagingBufferMemory, nullptr);
-
-	//	std::cout << "Successfully set initial particle data" << std::endl;
-	//}
-
 	void SetInitialParticleData()
 	{
 		// staging buffer
@@ -622,15 +568,11 @@ public:
 		commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 		VK_CHECK_RESULT(vkBeginCommandBuffer(copyCommandBufferHandle, &commandBufferBeginInfo));
 
-		VkBufferCopy bufferCopyRegion
-		{
-			0,
-			0,
-			stagingBufferMemoryRequirements.size
-		};
-
-		vkCmdCopyBuffer(copyCommandBufferHandle, stagingBufferHandle, particlesBuffer_, 1, &bufferCopyRegion);
+		VkBufferCopy copyRegion = {};
+		copyRegion.size = stagingBufferMemoryRequirements.size;
+		vkCmdCopyBuffer(copyCommandBufferHandle, stagingBufferHandle, particlesBuffer_, 1, &copyRegion);
 		VK_CHECK_RESULT(vkEndCommandBuffer(copyCommandBufferHandle));
+
 		VkSubmitInfo submitInfo = CsySmallVk::submitInfo();
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &copyCommandBufferHandle;
@@ -646,7 +588,10 @@ public:
 
 	void RunSimulation()
 	{
-		VK_CHECK_RESULT(vkQueueSubmit(device->GetQueue(QueueFlags::Compute), 1, &computeSubmitInfo_, VK_NULL_HANDLE));
+		VkSubmitInfo submitInfo = vks::initializers::submitInfo();
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &computeCommandBuffer_;
+		VK_CHECK_RESULT(vkQueueSubmit(device->GetQueue(QueueFlags::Compute), 1, &submitInfo, VK_NULL_HANDLE));
 	}
 
 	void Render()
