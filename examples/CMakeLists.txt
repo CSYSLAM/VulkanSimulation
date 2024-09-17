@@ -89,7 +89,8 @@ set(EXAMPLES
 	computeclothPBDonlydistcons
 	computeclothPBDNeoHook
 	SPRING_SharedMemory
-	computesph
+	computeSph
+	computeEulerFluid
 )
 
 buildExamples()

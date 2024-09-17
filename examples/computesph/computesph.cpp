@@ -39,7 +39,7 @@
 #define BUFFER_ELEMENTS 32
 #define LOG(...) printf(__VA_ARGS__)
 
-std::string shaderDir = "glsl/computesph/";
+std::string shaderDir = "glsl/computeSph/";
 const std::string shadersPath = getShaderBasePath() + shaderDir;
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugMessageCallback(
