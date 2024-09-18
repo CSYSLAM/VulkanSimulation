@@ -91,6 +91,8 @@ set(EXAMPLES
 	SPRING_SharedMemory
 	computeSph
 	computeEulerFluid
+	computeMpm
+	simpleParticles
 )
 
 buildExamples()
