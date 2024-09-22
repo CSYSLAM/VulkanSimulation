@@ -67,54 +67,29 @@ void main()
 	vec3 vel = particleIn[index].vel.xyz;
 
 	// Spring forces from neighboring particles
-	// left
-	if (localX > 0) {
-		force += springForce(sharedPositions[localY][localX-1].xyz, pos, params.restDistH);
-	} else if (id.x > 0) {
-		force += springForce(particleIn[index-1].pos.xyz, pos, params.restDistH);
-	}
-	// right
-	if (localX < 9) {
-		force += springForce(sharedPositions[localY][localX+1].xyz, pos, params.restDistH);
-	} else if (id.x < params.particleCount.x - 1) {
-		force += springForce(particleIn[index+1].pos.xyz, pos, params.restDistH);
-	}
-	// upper
-	if (localY < 9) {
-		force += springForce(sharedPositions[localY+1][localX].xyz, pos, params.restDistV);
-	} else if (id.y < params.particleCount.y - 1) {
-		force += springForce(particleIn[index + params.particleCount.x].pos.xyz, pos, params.restDistV);
-	}
-	// lower
-	if (localY > 0) {
-		force += springForce(sharedPositions[localY-1][localX].xyz, pos, params.restDistV);
-	} else if (id.y > 0) {
-		force += springForce(particleIn[index - params.particleCount.x].pos.xyz, pos, params.restDistV);
-	}
-	// upper-left
-	if ((localX > 0) && (localY < 9)) {
-		force += springForce(sharedPositions[localY+1][localX-1].xyz, pos, params.restDistD);
-	} else if ((id.x > 0) && (id.y < params.particleCount.y - 1)) {
-		force += springForce(particleIn[index + params.particleCount.x - 1].pos.xyz, pos, params.restDistD);
-	}
-	// lower-left
-	if ((localX > 0) && (localY > 0)) {
-		force += springForce(sharedPositions[localY-1][localX-1].xyz, pos, params.restDistD);
-	} else if ((id.x > 0) && (id.y > 0)) {
-		force += springForce(particleIn[index - params.particleCount.x - 1].pos.xyz, pos, params.restDistD);
-	}
-	// upper-right
-	if ((localX < 9) && (localY < 9)) {
-		force += springForce(sharedPositions[localY+1][localX+1].xyz, pos, params.restDistD);
-	} else if ((id.x < params.particleCount.x - 1) && (id.y < params.particleCount.y - 1)) {
-		force += springForce(particleIn[index + params.particleCount.x + 1].pos.xyz, pos, params.restDistD);
-	}
-	// lower-right
-	if ((localX < 9) && (localY > 0)) {
-		force += springForce(sharedPositions[localY-1][localX+1].xyz, pos, params.restDistD);
-	} else if ((id.x < params.particleCount.x - 1) && (id.y > 0)) {
-		force += springForce(particleIn[index - params.particleCount.x + 1].pos.xyz, pos, params.restDistD);
-	}
+	// 左侧
+	force += springForce(mix(particleIn[index-1].pos.xyz, sharedPositions[localY][localX-1].xyz, float(localX > 0)), pos, params.restDistH) * float(id.x > 0);
+
+	// 右侧
+	force += springForce(mix(particleIn[index+1].pos.xyz, sharedPositions[localY][localX+1].xyz, float(localX < 9)), pos, params.restDistH) * float(id.x < params.particleCount.x - 1);
+
+	// 上方
+	force += springForce(mix(particleIn[index + params.particleCount.x].pos.xyz, sharedPositions[localY+1][localX].xyz, float(localY < 9)), pos, params.restDistV) * float(id.y < params.particleCount.y - 1);
+
+	// 下方
+	force += springForce(mix(particleIn[index - params.particleCount.x].pos.xyz, sharedPositions[localY-1][localX].xyz, float(localY > 0)), pos, params.restDistV) * float(id.y > 0);
+
+	// 左上
+	force += springForce(mix(particleIn[index + params.particleCount.x - 1].pos.xyz, sharedPositions[localY+1][localX-1].xyz, float(localX > 0 && localY < 9)), pos, params.restDistD) * float(id.x > 0 && id.y < params.particleCount.y - 1);
+
+	// 左下
+	force += springForce(mix(particleIn[index - params.particleCount.x - 1].pos.xyz, sharedPositions[localY-1][localX-1].xyz, float(localX > 0 && localY > 0)), pos, params.restDistD) * float(id.x > 0 && id.y > 0);
+
+	// 右上
+	force += springForce(mix(particleIn[index + params.particleCount.x + 1].pos.xyz, sharedPositions[localY+1][localX+1].xyz, float(localX < 9 && localY < 9)), pos, params.restDistD) * float(id.x < params.particleCount.x - 1 && id.y < params.particleCount.y - 1);
+
+	// 右下
+	force += springForce(mix(particleIn[index - params.particleCount.x + 1].pos.xyz, sharedPositions[localY-1][localX+1].xyz, float(localX < 9 && localY > 0)), pos, params.restDistD) * float(id.x < params.particleCount.x - 1 && id.y > 0);
 
 	force += (-params.damping * vel);
 
