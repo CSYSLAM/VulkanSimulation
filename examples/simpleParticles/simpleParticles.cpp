@@ -29,17 +29,28 @@
 #include <cstdint>
 #include <atomic>
 #include <thread>
+#include <chrono>
+#include <cmath>
 
-#define NUM_PARTICLES 20000
+#define NUM_PARTICLES 100000
+
+struct Vertex {
+	glm::vec2 pos;
+	glm::vec2 vel;
+};
+
+struct PushConstants {
+	glm::vec2 attractor;
+	float attractor_strength;
+	float delta_time;
+};
+
 #define WORK_GROUP_SIZE 128
-#define PARTICLE_RADIUS 0.005f
-// work group count is the ceiling of particle count divided by work group size
 #define NUM_WORK_GROUPS ((NUM_PARTICLES + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE)
-#define DEBUG (!NDEBUG)
-#define BUFFER_ELEMENTS 32
+
 #define LOG(...) printf(__VA_ARGS__)
 
-std::string shaderDir = "glsl/computeSph/";
+std::string shaderDir = "glsl/simpleParticles/";
 const std::string shadersPath = getShaderBasePath() + shaderDir;
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugMessageCallback(
@@ -61,10 +72,12 @@ CommandLineParser commandLineParser;
 class VulkanExample
 {
 public:
-	uint32_t windowHeight_ = 1000;
-	uint32_t windowWidth_ = 1000;
+	uint32_t windowWidth_ = 800;
+	uint32_t windowHeight_ = 600;
 	bool paused_ = false;
 	std::atomic_uint64_t frameNumber_ = 1;
+	std::chrono::steady_clock::time_point startTime_;
+	std::chrono::steady_clock::time_point lastFrameTime_;
 
 	VkSurfaceKHR surface_;
 	VkPhysicalDeviceFeatures physicalDeviceFeatures_;
@@ -90,7 +103,7 @@ public:
 	VkDescriptorSetLayout computeDescriptorSetLayout_;
 	VkDescriptorSet computeDescriptorSet_;
 	VkPipelineLayout computePipelineLayout_;
-	VkPipeline computePipeline_[3] = { VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE };
+	VkPipeline computePipeline_;
 	VkCommandPool computeCommandPool_;
 	VkCommandBuffer computeCommandBuffer_;
 	uint32_t imageIndex_;
@@ -132,20 +145,10 @@ public:
 	VkPipeline pipeline;
 	VkShaderModule shaderModule;
 
-	// ssbo sizes
-	const uint64_t positionBufferSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
-	const uint64_t velocityBufferSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
-	const uint64_t forceBufferSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
-	const uint64_t densityBufferSize_ = sizeof(float) * NUM_PARTICLES;
-	const uint64_t pressureBufferSize_ = sizeof(float) * NUM_PARTICLES;
+	const uint64_t bufferSize_ = NUM_PARTICLES * sizeof(Vertex);
+	const uint64_t bufferOffset_ = 0;
 
-	const uint64_t bufferSize_ = positionBufferSize_ + velocityBufferSize_ + forceBufferSize_ + densityBufferSize_ + pressureBufferSize_;
-	// ssbo offsets
-	const uint64_t positionBufferOffset_ = 0;
-	const uint64_t velocityBufferOffset_ = positionBufferSize_;
-	const uint64_t forceBufferOffset_ = velocityBufferOffset_ + velocityBufferSize_;
-	const uint64_t densityBufferOffset_ = forceBufferOffset_ + forceBufferSize_;
-	const uint64_t pressureBufferOffset_ = densityBufferOffset_ + densityBufferSize_;
+	// Assuming these are defined elsewhere in your C++ code
 
 	VkDebugReportCallbackEXT debugReportCallback{};
 
@@ -281,15 +284,18 @@ public:
 		VkVertexInputBindingDescription vertexInputBindingDescription =
 			vks::initializers::vertexInputBindingDescription(0, sizeof(glm::vec2), VK_VERTEX_INPUT_RATE_VERTEX);
 
-		// layout(location = 0) in vec2 position;
-		VkVertexInputAttributeDescription vertexInputAttributeDescription =
-			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32_SFLOAT, 0);
+		//layout(location = 0) in vec2 pos;
+		//layout(location = 1) in vec2 vel;
+		std::array<VkVertexInputAttributeDescription, 2> vertexInputAttributeDescriptions = {
+			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos)),
+			vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, vel))
+		};
 
 		VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo = vks::initializers::pipelineVertexInputStateCreateInfo();
 		vertexInputStateCreateInfo.vertexBindingDescriptionCount = 1;
 		vertexInputStateCreateInfo.pVertexBindingDescriptions = &vertexInputBindingDescription;
-		vertexInputStateCreateInfo.vertexAttributeDescriptionCount = 1;
-		vertexInputStateCreateInfo.pVertexAttributeDescriptions = &vertexInputAttributeDescription;
+		vertexInputStateCreateInfo.vertexAttributeDescriptionCount = 2;
+		vertexInputStateCreateInfo.pVertexAttributeDescriptions = vertexInputAttributeDescriptions.data();;
 
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo =
 				vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_POINT_LIST, 0, VK_FALSE);
@@ -341,7 +347,7 @@ public:
 				vks::initializers::commandBufferAllocateInfo(graphicsCommandPool_, VK_COMMAND_BUFFER_LEVEL_PRIMARY, static_cast<uint32_t>(graphicsCommandBuffer_.size()));
 		VK_CHECK_RESULT(vkAllocateCommandBuffers(device->GetVkDevice(), &graphicsCommandBufferAllocationInfo, graphicsCommandBuffer_.data()));
 		
-		VkClearValue clearValues{ 0.92f, 0.92f, 0.92f, 1.0f };
+		VkClearValue clearValues{ 0.0f, 0.0f, 0.0f, 1.0f };
 		VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
 		renderPassBeginInfo.renderPass = renderPass_;
 		renderPassBeginInfo.renderArea.offset.x = 0;
@@ -387,11 +393,7 @@ public:
 	void CreateComputeDescriptorSetLayout()
 	{
 		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 0),
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1),
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 2),
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 3),
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 4),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 0)
 		};
 		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device->GetVkDevice(), &descriptorSetLayoutCreateInfo, NULL, &computeDescriptorSetLayout_));
@@ -404,32 +406,15 @@ public:
 		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(globalDescriptorPool_, &computeDescriptorSetLayout_, 1);
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device->GetVkDevice(), &allocInfo, &computeDescriptorSet_));
 
-		VkDescriptorBufferInfo descriptorBufferInfos[5];
-		descriptorBufferInfos[0].buffer = particlesBuffer_;
-		descriptorBufferInfos[0].offset = positionBufferOffset_;
-		descriptorBufferInfos[0].range = positionBufferSize_;
-		descriptorBufferInfos[1].buffer = particlesBuffer_;
-		descriptorBufferInfos[1].offset = velocityBufferOffset_;
-		descriptorBufferInfos[1].range = velocityBufferSize_;
-		descriptorBufferInfos[2].buffer = particlesBuffer_;
-		descriptorBufferInfos[2].offset = forceBufferOffset_;
-		descriptorBufferInfos[2].range = forceBufferSize_;
-		descriptorBufferInfos[3].buffer = particlesBuffer_;
-		descriptorBufferInfos[3].offset = densityBufferOffset_;
-		descriptorBufferInfos[3].range = densityBufferSize_;
-		descriptorBufferInfos[4].buffer = particlesBuffer_;
-		descriptorBufferInfos[4].offset = pressureBufferOffset_;
-		descriptorBufferInfos[4].range = pressureBufferSize_;
+		VkDescriptorBufferInfo descriptorBufferInfos;
+		descriptorBufferInfos.buffer = particlesBuffer_;
+		descriptorBufferInfos.offset = bufferOffset_;
+		descriptorBufferInfos.range = bufferSize_;
 
 		// write descriptor sets
-		VkWriteDescriptorSet writeDescriptorSets[5];
-		for (int index = 0; index < 5; index++)
-		{
-			VkWriteDescriptorSet write =
-				vks::initializers::writeDescriptorSet(computeDescriptorSet_, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, index, & descriptorBufferInfos[index]);
-			writeDescriptorSets[index] = write;
-		}
-		vkUpdateDescriptorSets(device->GetVkDevice(), 5, writeDescriptorSets, 0, NULL);
+		VkWriteDescriptorSet writeDescriptorSets =
+			vks::initializers::writeDescriptorSet(computeDescriptorSet_, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0, &descriptorBufferInfos);
+		vkUpdateDescriptorSets(device->GetVkDevice(), 1, &writeDescriptorSets, 0, NULL);
 		std::cout << "Successfully update compute descriptorsets" << std::endl;
 	}
 
@@ -437,30 +422,25 @@ public:
 	{
 		VkPipelineLayoutCreateInfo layoutCreateInfo =
 			vks::initializers::pipelineLayoutCreateInfo(&computeDescriptorSetLayout_, 1);
+
+		// Push constants used to pass some parameters
+		VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_COMPUTE_BIT, sizeof(PushConstants), 0);
+		layoutCreateInfo.pushConstantRangeCount = 1;
+		layoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device->GetVkDevice(), &layoutCreateInfo, nullptr, &computePipelineLayout_));
 		std::cout << "Successfully create compute pipeline layout" << std::endl;
 	}
 
 	void CreateComputePipelines()
 	{
-		// first
 		VkPipelineShaderStageCreateInfo shaderStageCreateInfo = CsySmallVk::pipelineShaderStageCreateInfo();
-		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "compute_density_pressure.comp.spv").c_str(), device->GetVkDevice());
+		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "particle.comp.spv").c_str(), device->GetVkDevice());
 		shaderStageCreateInfo.pName = "main";
 
 		VkComputePipelineCreateInfo createInfo = vks::initializers::computePipelineCreateInfo(computePipelineLayout_, 0);
 		createInfo.stage = shaderStageCreateInfo;
-		VK_CHECK_RESULT(vkCreateComputePipelines(device->GetVkDevice(), globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[0]));
-
-		//second
-		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "compute_force.comp.spv").c_str(), device->GetVkDevice());
-		createInfo.stage = shaderStageCreateInfo;
-		VK_CHECK_RESULT(vkCreateComputePipelines(device->GetVkDevice(), globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[1]));
-
-		//third
-		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "integrate.comp.spv").c_str(), device->GetVkDevice());
-		createInfo.stage = shaderStageCreateInfo;
-		VK_CHECK_RESULT(vkCreateComputePipelines(device->GetVkDevice(), globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[2]));
+		VK_CHECK_RESULT(vkCreateComputePipelines(device->GetVkDevice(), globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_));
 		std::cout << "Successfully create compute pipelines" << std::endl;
 	}
 
@@ -473,40 +453,30 @@ public:
 		std::cout << "Successfully create compute command pool" << std::endl;
 	}
 
-	void CreateComputeCommandBuffer()
+	void RecordComputeCommandBuffer(const PushConstants& push_constants)
 	{
-		VkCommandBufferAllocateInfo allocInfo =
-				vks::initializers::commandBufferAllocateInfo(computeCommandPool_, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
-		VK_CHECK_RESULT(vkAllocateCommandBuffers(device->GetVkDevice(), &allocInfo, &computeCommandBuffer_));
-
+		// 重置命令缓冲区以重新记录
+		VK_CHECK_RESULT(vkResetCommandBuffer(computeCommandBuffer_, 0));
+		// 开始记录命令缓冲区
 		VkCommandBufferBeginInfo beginInfo = vks::initializers::commandBufferBeginInfo();
-		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 		VK_CHECK_RESULT(vkBeginCommandBuffer(computeCommandBuffer_, &beginInfo));
-		vkCmdBindDescriptorSets(computeCommandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout_, 0, 1, &computeDescriptorSet_, 0, NULL);
-		// First dispatch
-		vkCmdBindPipeline(computeCommandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_[0]);
+		// 绑定计算管线和描述符集
+		vkCmdBindPipeline(computeCommandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_);
+		vkCmdBindDescriptorSets(computeCommandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout_, 0, 1, &computeDescriptorSet_, 0, nullptr);
+		// 设置推送常量
+		vkCmdPushConstants(computeCommandBuffer_, computePipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &push_constants);
+		// 调度计算着色器
 		vkCmdDispatch(computeCommandBuffer_, NUM_WORK_GROUPS, 1, 1);
+		// 添加管线屏障以确保计算着色器完成
+		VkMemoryBarrier memoryBarrier = {};
+		memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		memoryBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+		vkCmdPipelineBarrier(computeCommandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0,
+			1, &memoryBarrier, 0, nullptr, 0, nullptr);
 
-		// Barrier: compute to compute dependencies
-		// First dispatch writes to a storage buffer, second dispatch reads from that storage buffer
-		vkCmdPipelineBarrier(computeCommandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, 0, NULL, 0, NULL);
-
-		// Second dispatch
-		vkCmdBindPipeline(computeCommandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_[1]);
-		vkCmdDispatch(computeCommandBuffer_, NUM_WORK_GROUPS, 1, 1);
-
-		// Barrier: compute to compute dependencies
-		// Second dispatch writes to a storage buffer, third dispatch reads from that storage buffer
-		vkCmdPipelineBarrier(computeCommandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, 0, NULL, 0, NULL);
-
-		// Third dispatch
-		// Third dispatch writes to the storage buffer. Later, vkCmdDraw reads that buffer as a vertex buffer with vkCmdBindVertexBuffers.
-		vkCmdBindPipeline(computeCommandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_[2]);
-		vkCmdDispatch(computeCommandBuffer_, NUM_WORK_GROUPS, 1, 1);
-
-		vkCmdPipelineBarrier(computeCommandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, 0, NULL, 0, NULL);
-		vkEndCommandBuffer(computeCommandBuffer_);
-		std::cout << "Successfully create compute command buffer" << std::endl;
+		// 结束记录命令缓冲区
+		VK_CHECK_RESULT(vkEndCommandBuffer(computeCommandBuffer_));
 	}
 
 	void SetInitialParticleData()
@@ -538,22 +508,20 @@ public:
 		void* mappedMemory = NULL;
 		vkMapMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle, 0, stagingBufferMemoryRequirements.size, 0, &mappedMemory);
 
-		// set the initial particles data
-		std::vector<glm::vec2> initialParticlePosition(NUM_PARTICLES);
-		for (auto i = 0, x = 0, y = 0; i < NUM_PARTICLES; i++)
-		{
-			initialParticlePosition[i].x = -0.625f + PARTICLE_RADIUS * 2 * x;
-			initialParticlePosition[i].y = -1 + PARTICLE_RADIUS * 2 * y;
-			x++;
-			if (x >= 125)
-			{
-				x = 0;
-				y++;
-			}
+		std::vector<Vertex> initialParticlePosition;
+		initialParticlePosition.reserve(NUM_PARTICLES);
+
+		for (int i = 0; i < NUM_PARTICLES; ++i) {
+			float f = static_cast<float>(i) / (NUM_PARTICLES / 10);
+			Vertex vertex;
+			vertex.pos = glm::vec2(2.0f * glm::fract(f) - 1.0f, 0.2f * glm::floor(f) - 1.0f);
+			vertex.vel = glm::vec2(0.0f);
+			initialParticlePosition.push_back(vertex);
 		}
+
 		// zero all 
 		std::memset(mappedMemory, 0, bufferSize_);
-		std::memcpy(mappedMemory, initialParticlePosition.data(), positionBufferSize_);
+		std::memcpy(mappedMemory, initialParticlePosition.data(), bufferSize_);
 		vkUnmapMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle);
 
 		// submit a command buffer to copy staging buffer to the particle buffer 
@@ -588,11 +556,26 @@ public:
 
 	void RunSimulation()
 	{
+		// 更新每帧变量
+		auto now = std::chrono::steady_clock::now();
+		float time = std::chrono::duration<float>(now - startTime_).count();
+		float delta_time = std::chrono::duration<float>(now - lastFrameTime_).count();
+		lastFrameTime_ = now;
+
+		PushConstants push_constants;
+		push_constants.attractor = glm::vec2(0.75f * std::cos(3.0f * time), 0.6f * std::sin(0.75f * time));
+		push_constants.attractor_strength = 1.2f * std::cos(2.0f * time);
+		push_constants.delta_time = delta_time;
+
+		// 记录计算命令缓冲区
+		RecordComputeCommandBuffer(push_constants);
+
 		VkSubmitInfo submitInfo = vks::initializers::submitInfo();
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &computeCommandBuffer_;
 		VK_CHECK_RESULT(vkQueueSubmit(device->GetQueue(QueueFlags::Compute), 1, &submitInfo, VK_NULL_HANDLE));
 	}
+
 
 	void Render()
 	{
@@ -611,7 +594,6 @@ public:
 		static std::chrono::high_resolution_clock::time_point frame_start;
 		static std::chrono::high_resolution_clock::time_point frame_end;
 		static int64_t total_frame_time_ns;
-
 		frame_start = std::chrono::high_resolution_clock::now();
 
 		// process user inputs
@@ -650,7 +632,8 @@ public:
 				std::cout << "[INFO] frame count after 20 seconds after setup (do not pause or move the window): " << frameNumber_ << std::endl;
 			}
 		).detach();
-
+		startTime_ = std::chrono::steady_clock::now();
+		lastFrameTime_ = startTime_;
 		while (!ShouldQuit())
 		{
 			MainLoop();
@@ -706,8 +689,12 @@ public:
 		CreateComputePipelineLayout();
 		CreateComputePipelines();
 		CreateComputeCommandPool();
-		CreateComputeCommandBuffer();
 		SetInitialParticleData();
+
+		VkCommandBufferAllocateInfo allocInfo =
+			vks::initializers::commandBufferAllocateInfo(computeCommandPool_, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
+		VK_CHECK_RESULT(vkAllocateCommandBuffers(device->GetVkDevice(), &allocInfo, &computeCommandBuffer_));
+		std::cout << "Successfully allocated compute command buffer" << std::endl;
 	}
 
 	~VulkanExample()

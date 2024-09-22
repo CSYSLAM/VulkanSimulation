@@ -667,7 +667,7 @@ public:
 
 	VulkanExample()
 	{
-		LOG("Running headless compute example\n");
+		LOG("Running MPM simulation\n");
 		static constexpr char* applicationName = "Vulkan Example";
 		InitializeWindow((int)windowWidth_, (int)windowHeight_, applicationName);
 
