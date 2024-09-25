@@ -1,5 +1,10 @@
 #version 450
 
+#define NUM_PARTICLE 4096
+#define ELASTIC_LAMBDA 10.0f
+#define ELASTIC_MU 20.0f
+#define DT 0.1f
+
 struct Particle {
   mat2 C;
   vec2 pos;
@@ -19,19 +24,12 @@ layout(local_size_x = 1) in;
 layout(set = 0, binding = 0) buffer readonly Pos { Particle particles[]; };
 layout(set = 0, binding = 1) buffer cells { Cell grid[]; };
 layout(set = 0, binding = 2) buffer readonly deformationGradient { mat2 Fs[]; };
-layout(binding = 3) uniform UBO {
-  float deltaT;
-  float particleCount;
-  float elastic_lambda;
-  float elastic_mu;
-}
-ubo;
 
-const int GRID_RESOLUTION = 64;
+const int GRID_RESOLUTION = 10;
 const float GRAVITY       = 0.3;
 
 void main() {
-  for (int i = 0; i < ubo.particleCount; ++i) {
+  for (int i = 0; i < NUM_PARTICLE; ++i) {
     Particle p = particles[i];
 
     // deformation gradient
@@ -48,8 +46,8 @@ void main() {
     mat2 F_minus_F_inv_T = F - F_inv_T;
 
     // MPM course equation 48
-    mat2 P_term_0 = ubo.elastic_mu * (F_minus_F_inv_T);
-    mat2 P_term_1 = ubo.elastic_lambda * log(J) * F_inv_T;
+    mat2 P_term_0 = ELASTIC_MU * (F_minus_F_inv_T);
+    mat2 P_term_1 = ELASTIC_LAMBDA * log(J) * F_inv_T;
     mat2 P        = P_term_0 + P_term_1;
 
     // cauchy_stress = (1 / det(F)) * P * F_T
@@ -59,8 +57,8 @@ void main() {
     // (M_p)^-1 = 4, see APIC paper and MPM course page 42
     // this term is used in MLS-MPM paper eq. 16. with quadratic weights, Mp = (1/4) * (delta_x)^2.
     // in this simulation, delta_x = 1, because i scale the rendering of the domain rather than the domain itself.
-    // we multiply by ubo.deltaT as part of the process of fusing the momentum and force update for MLS-MPM
-    mat2 eq_16_term_0 = -volume * 4 * stress * ubo.deltaT;
+    // we multiply by DT as part of the process of fusing the momentum and force update for MLS-MPM
+    mat2 eq_16_term_0 = -volume * 4 * stress * DT;
 
     // quadratic interpolation weights
     const ivec2 cell_idx  = ivec2(p.pos);  // uvec2 -> unsigned
@@ -97,7 +95,7 @@ void main() {
         cell.vel += momentum;
 
         // total update on cell.v is now:
-        // weight * (ubo.deltaT * M^-1 * p.volume * p.stress + p.mass * p.C)
+        // weight * (DT * M^-1 * p.volume * p.stress + p.mass * p.C)
         // this is the fused momentum + force from MLS-MPM. however, instead of our stress being derived from the energy
         // density, i use the weak form with cauchy stress. converted: p.volume_0 * (dΨ/dF)(Fp)*(Fp_transposed) is equal
         // to p.volume * σ

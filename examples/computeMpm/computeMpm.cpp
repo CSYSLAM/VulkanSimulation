@@ -30,16 +30,37 @@
 #include <atomic>
 #include <thread>
 
-#define NUM_PARTICLES 20000
+#define NUM_PARTICLE 20000
+#define GRID_RESOLUTION 10
+#define NUM_CELLS (GRID_RESOLUTION * GRID_RESOLUTION)
+#define ELASTIC_LAMBDA 10.0f
+#define ELASTIC_MU 20.0f
+#define DT 0.1f
 #define WORK_GROUP_SIZE 128
 #define PARTICLE_RADIUS 0.005f
+
 // work group count is the ceiling of particle count divided by work group size
-#define NUM_WORK_GROUPS ((NUM_PARTICLES + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE)
+#define NUM_WORK_GROUPS ((NUM_PARTICLE + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE)
 #define DEBUG (!NDEBUG)
 #define BUFFER_ELEMENTS 32
 #define LOG(...) printf(__VA_ARGS__)
 
-std::string shaderDir = "glsl/computeSph/";
+struct alignas(16) Particle {
+	alignas(16) glm::mat2 C;   // affine momentum matrix
+	alignas(8) glm::vec2 pos;  // position "vec2" because this mpm example works in 2D
+	alignas(8) glm::vec2 vel;  // velocity
+	alignas(4) float mass;
+	alignas(4) float volume_0;  // initial volume
+	alignas(8) glm::vec2 padding;
+};
+
+struct alignas(16) Cell {
+	alignas(8) glm::vec2 vel;  // velocity
+	alignas(4) float mass;
+	alignas(4) float padding;
+};
+
+std::string shaderDir = "glsl/computeMpm/";
 const std::string shadersPath = getShaderBasePath() + shaderDir;
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugMessageCallback(
@@ -78,8 +99,6 @@ public:
 	std::vector<VkFramebuffer> swapchainFrameBuffer_;
 	VkPipelineCache globalPipelineCache_;
 	VkDescriptorPool globalDescriptorPool_;
-	VkBuffer particlesBuffer_;
-	VkDeviceMemory packedParticlesMemory_;
 	VkPipelineLayout graphicsPipelineLayout_;
 	VkPipeline graphicsPipeline_;
 	VkCommandPool graphicsCommandPool_;
@@ -90,7 +109,7 @@ public:
 	VkDescriptorSetLayout computeDescriptorSetLayout_;
 	VkDescriptorSet computeDescriptorSet_;
 	VkPipelineLayout computePipelineLayout_;
-	VkPipeline computePipeline_[3] = { VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE };
+	VkPipeline computePipeline_[4] = { VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE };
 	VkCommandPool computeCommandPool_;
 	VkCommandBuffer computeCommandBuffer_;
 	uint32_t imageIndex_;
@@ -132,20 +151,17 @@ public:
 	VkPipeline pipeline;
 	VkShaderModule shaderModule;
 
-	// ssbo sizes
-	const uint64_t positionBufferSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
-	const uint64_t velocityBufferSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
-	const uint64_t forceBufferSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
-	const uint64_t densityBufferSize_ = sizeof(float) * NUM_PARTICLES;
-	const uint64_t pressureBufferSize_ = sizeof(float) * NUM_PARTICLES;
+	VkDeviceMemory packedParticlesMemory_;
+	VkDeviceMemory packedGridMemory_;
+	VkDeviceMemory packedFsMemory_;
 
-	const uint64_t bufferSize_ = positionBufferSize_ + velocityBufferSize_ + forceBufferSize_ + densityBufferSize_ + pressureBufferSize_;
-	// ssbo offsets
-	const uint64_t positionBufferOffset_ = 0;
-	const uint64_t velocityBufferOffset_ = positionBufferSize_;
-	const uint64_t forceBufferOffset_ = velocityBufferOffset_ + velocityBufferSize_;
-	const uint64_t densityBufferOffset_ = forceBufferOffset_ + forceBufferSize_;
-	const uint64_t pressureBufferOffset_ = densityBufferOffset_ + densityBufferSize_;
+	VkBuffer particlesBuffer_;
+	VkBuffer gridBuffer_;
+	VkBuffer fsBuffer_;  // deformation gradient
+
+	const uint64_t particlesBufferSize_ = NUM_PARTICLE * sizeof(Particle);
+	const uint64_t gridBufferSize_ = NUM_CELLS * sizeof(Cell);
+	const uint64_t fsBufferSize_ = NUM_PARTICLE * sizeof(glm::mat2);
 
 	VkDebugReportCallbackEXT debugReportCallback{};
 
@@ -224,7 +240,7 @@ public:
 	void CreateDescriptorPool()
 	{
 		std::vector<VkDescriptorPoolSize> poolSizes = {
-			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 5),
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3)
 		};
 		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 1);
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device->GetVkDevice(), &descriptorPoolInfo, NULL, &globalDescriptorPool_));
@@ -249,7 +265,15 @@ public:
 	{
 		VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 		VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-		BufferUtilsCsy::CreateBuffer(device, bufferSize_, usage, properties, particlesBuffer_, packedParticlesMemory_);
+		BufferUtilsCsy::CreateBuffer(device, particlesBufferSize_, usage, properties, particlesBuffer_, packedParticlesMemory_);
+
+		usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+		BufferUtilsCsy::CreateBuffer(device, gridBufferSize_, usage, properties, gridBuffer_, packedGridMemory_);
+
+		usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+		BufferUtilsCsy::CreateBuffer(device, fsBufferSize_, usage, properties, fsBuffer_, packedFsMemory_);
 		std::cout << "Successfully create buffers" << std::endl;
 	}
 
@@ -279,17 +303,22 @@ public:
 
 
 		VkVertexInputBindingDescription vertexInputBindingDescription =
-			vks::initializers::vertexInputBindingDescription(0, sizeof(glm::vec2), VK_VERTEX_INPUT_RATE_VERTEX);
+			vks::initializers::vertexInputBindingDescription(0, sizeof(Particle), VK_VERTEX_INPUT_RATE_VERTEX);
 
-		// layout(location = 0) in vec2 position;
-		VkVertexInputAttributeDescription vertexInputAttributeDescription =
-			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32_SFLOAT, 0);
+		//layout(location = 0) in vec2 inPos;
+		//layout(location = 1) in vec2 inVel;
+		//layout(location = 2) in float inMass;
+		std::array<VkVertexInputAttributeDescription, 3> vertexInputAttributeDescriptions = {
+			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Particle, pos)),
+			vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32_SFLOAT, offsetof(Particle, vel)),
+			vks::initializers::vertexInputAttributeDescription(0, 2, VK_FORMAT_R32_SFLOAT, offsetof(Particle, mass))
+		};
 
 		VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo = vks::initializers::pipelineVertexInputStateCreateInfo();
 		vertexInputStateCreateInfo.vertexBindingDescriptionCount = 1;
 		vertexInputStateCreateInfo.pVertexBindingDescriptions = &vertexInputBindingDescription;
-		vertexInputStateCreateInfo.vertexAttributeDescriptionCount = 1;
-		vertexInputStateCreateInfo.pVertexAttributeDescriptions = &vertexInputAttributeDescription;
+		vertexInputStateCreateInfo.vertexAttributeDescriptionCount = 3;
+		vertexInputStateCreateInfo.pVertexAttributeDescriptions = vertexInputAttributeDescriptions.data();
 
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo =
 				vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_POINT_LIST, 0, VK_FALSE);
@@ -369,7 +398,7 @@ public:
 
 			VkDeviceSize offsets = 0;
 			vkCmdBindVertexBuffers(graphicsCommandBuffer_[i], 0, 1, &particlesBuffer_, &offsets);
-			vkCmdDraw(graphicsCommandBuffer_[i], NUM_PARTICLES, 1, 0, 0);
+			vkCmdDraw(graphicsCommandBuffer_[i], NUM_PARTICLE, 1, 0, 0);
 			vkCmdEndRenderPass(graphicsCommandBuffer_[i]);
 			VK_CHECK_RESULT(vkEndCommandBuffer(graphicsCommandBuffer_[i]));
 		}
@@ -387,11 +416,10 @@ public:
 	void CreateComputeDescriptorSetLayout()
 	{
 		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+			// Binding 0 : Particle position storage buffer
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 0),
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1),
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 2),
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 3),
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 4),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 2)
 		};
 		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device->GetVkDevice(), &descriptorSetLayoutCreateInfo, NULL, &computeDescriptorSetLayout_));
@@ -404,32 +432,26 @@ public:
 		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(globalDescriptorPool_, &computeDescriptorSetLayout_, 1);
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device->GetVkDevice(), &allocInfo, &computeDescriptorSet_));
 
-		VkDescriptorBufferInfo descriptorBufferInfos[5];
+		VkDescriptorBufferInfo descriptorBufferInfos[3];
 		descriptorBufferInfos[0].buffer = particlesBuffer_;
-		descriptorBufferInfos[0].offset = positionBufferOffset_;
-		descriptorBufferInfos[0].range = positionBufferSize_;
-		descriptorBufferInfos[1].buffer = particlesBuffer_;
-		descriptorBufferInfos[1].offset = velocityBufferOffset_;
-		descriptorBufferInfos[1].range = velocityBufferSize_;
-		descriptorBufferInfos[2].buffer = particlesBuffer_;
-		descriptorBufferInfos[2].offset = forceBufferOffset_;
-		descriptorBufferInfos[2].range = forceBufferSize_;
-		descriptorBufferInfos[3].buffer = particlesBuffer_;
-		descriptorBufferInfos[3].offset = densityBufferOffset_;
-		descriptorBufferInfos[3].range = densityBufferSize_;
-		descriptorBufferInfos[4].buffer = particlesBuffer_;
-		descriptorBufferInfos[4].offset = pressureBufferOffset_;
-		descriptorBufferInfos[4].range = pressureBufferSize_;
+		descriptorBufferInfos[0].offset = 0;
+		descriptorBufferInfos[0].range = particlesBufferSize_;
+		descriptorBufferInfos[1].buffer = gridBuffer_;
+		descriptorBufferInfos[1].offset = 0;
+		descriptorBufferInfos[1].range = gridBufferSize_;
+		descriptorBufferInfos[2].buffer = fsBuffer_;
+		descriptorBufferInfos[2].offset = 0;
+		descriptorBufferInfos[2].range = fsBufferSize_;
 
 		// write descriptor sets
-		VkWriteDescriptorSet writeDescriptorSets[5];
-		for (int index = 0; index < 5; index++)
+		VkWriteDescriptorSet writeDescriptorSets[3];
+		for (int index = 0; index < 3; index++)
 		{
 			VkWriteDescriptorSet write =
 				vks::initializers::writeDescriptorSet(computeDescriptorSet_, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, index, & descriptorBufferInfos[index]);
 			writeDescriptorSets[index] = write;
 		}
-		vkUpdateDescriptorSets(device->GetVkDevice(), 5, writeDescriptorSets, 0, NULL);
+		vkUpdateDescriptorSets(device->GetVkDevice(), 3, writeDescriptorSets, 0, NULL);
 		std::cout << "Successfully update compute descriptorsets" << std::endl;
 	}
 
@@ -445,7 +467,7 @@ public:
 	{
 		// first
 		VkPipelineShaderStageCreateInfo shaderStageCreateInfo = CsySmallVk::pipelineShaderStageCreateInfo();
-		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "compute_density_pressure.comp.spv").c_str(), device->GetVkDevice());
+		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "clear_grid.comp.spv").c_str(), device->GetVkDevice());
 		shaderStageCreateInfo.pName = "main";
 
 		VkComputePipelineCreateInfo createInfo = vks::initializers::computePipelineCreateInfo(computePipelineLayout_, 0);
@@ -453,14 +475,19 @@ public:
 		VK_CHECK_RESULT(vkCreateComputePipelines(device->GetVkDevice(), globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[0]));
 
 		//second
-		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "compute_force.comp.spv").c_str(), device->GetVkDevice());
+		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "particle_to_grid.comp.spv").c_str(), device->GetVkDevice());
 		createInfo.stage = shaderStageCreateInfo;
 		VK_CHECK_RESULT(vkCreateComputePipelines(device->GetVkDevice(), globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[1]));
 
 		//third
-		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "integrate.comp.spv").c_str(), device->GetVkDevice());
+		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "update_grid.comp.spv").c_str(), device->GetVkDevice());
 		createInfo.stage = shaderStageCreateInfo;
 		VK_CHECK_RESULT(vkCreateComputePipelines(device->GetVkDevice(), globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[2]));
+
+		//forth
+		shaderStageCreateInfo.module = vks::tools::loadShader((shadersPath + "grid_to_particle.comp.spv").c_str(), device->GetVkDevice());
+		createInfo.stage = shaderStageCreateInfo;
+		VK_CHECK_RESULT(vkCreateComputePipelines(device->GetVkDevice(), globalPipelineCache_, 1, &createInfo, NULL, &computePipeline_[3]));
 		std::cout << "Successfully create compute pipelines" << std::endl;
 	}
 
@@ -500,8 +527,16 @@ public:
 		vkCmdPipelineBarrier(computeCommandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, 0, NULL, 0, NULL);
 
 		// Third dispatch
-		// Third dispatch writes to the storage buffer. Later, vkCmdDraw reads that buffer as a vertex buffer with vkCmdBindVertexBuffers.
 		vkCmdBindPipeline(computeCommandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_[2]);
+		vkCmdDispatch(computeCommandBuffer_, NUM_WORK_GROUPS, 1, 1);
+
+		// Barrier: compute to compute dependencies
+		// Third dispatch writes to a storage buffer, third dispatch reads from that storage buffer
+		vkCmdPipelineBarrier(computeCommandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, 0, NULL, 0, NULL);
+
+		// Forth dispatch
+		// Forth dispatch writes to the storage buffer. Later, vkCmdDraw reads that buffer as a vertex buffer with vkCmdBindVertexBuffers.
+		vkCmdBindPipeline(computeCommandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_[3]);
 		vkCmdDispatch(computeCommandBuffer_, NUM_WORK_GROUPS, 1, 1);
 
 		vkCmdPipelineBarrier(computeCommandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, 0, NULL, 0, NULL);
@@ -509,82 +544,227 @@ public:
 		std::cout << "Successfully create compute command buffer" << std::endl;
 	}
 
-	void SetInitialParticleData()
+void SetInitialParticleData1()
+{
+	// staging buffer
+	VkBuffer stagingBufferHandle = VK_NULL_HANDLE;
+	VkDeviceMemory stagingBufferMemoryDeviceHandle = VK_NULL_HANDLE;
+	VkBufferCreateInfo stagingBufferCreateInfo = CsySmallVk::bufferCreateInfo();
+	stagingBufferCreateInfo.size = particlesBufferSize_;
+	stagingBufferCreateInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	stagingBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	stagingBufferCreateInfo.queueFamilyIndexCount = 0;
+	stagingBufferCreateInfo.pQueueFamilyIndices = nullptr;
+
+	vkCreateBuffer(device->GetVkDevice(), &stagingBufferCreateInfo, NULL, &stagingBufferHandle);
+
+	VkMemoryRequirements stagingBufferMemoryRequirements;
+	vkGetBufferMemoryRequirements(device->GetVkDevice(), stagingBufferHandle, &stagingBufferMemoryRequirements);
+
+	VkMemoryAllocateInfo allocInfo = CsySmallVk::memoryAllocateInfo();
+	allocInfo.allocationSize = stagingBufferMemoryRequirements.size;
+	allocInfo.memoryTypeIndex = findMemoryType(stagingBufferMemoryRequirements,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	VK_CHECK_RESULT(vkAllocateMemory(device->GetVkDevice(), &allocInfo, NULL, &stagingBufferMemoryDeviceHandle));
+
+	// bind the memory to the buffer object
+	vkBindBufferMemory(device->GetVkDevice(), stagingBufferHandle, stagingBufferMemoryDeviceHandle, 0);
+
+	void* mappedMemory = NULL;
+	vkMapMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle, 0, stagingBufferMemoryRequirements.size, 0, &mappedMemory);
+	
+	// Particle data
+	std::vector<Particle> particles(NUM_PARTICLE);
+	for (auto particleIndex = 0, x = 0, y = 0; particleIndex < NUM_PARTICLE; particleIndex++)
 	{
-		// staging buffer
-		VkBuffer stagingBufferHandle = VK_NULL_HANDLE;
-		VkDeviceMemory stagingBufferMemoryDeviceHandle = VK_NULL_HANDLE;
-		VkBufferCreateInfo stagingBufferCreateInfo = CsySmallVk::bufferCreateInfo();
-		stagingBufferCreateInfo.size = bufferSize_;
-		stagingBufferCreateInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-		stagingBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		stagingBufferCreateInfo.queueFamilyIndexCount = 0;
-		stagingBufferCreateInfo.pQueueFamilyIndices = nullptr;
-
-		vkCreateBuffer(device->GetVkDevice(), &stagingBufferCreateInfo, NULL, &stagingBufferHandle);
-
-		VkMemoryRequirements stagingBufferMemoryRequirements;
-		vkGetBufferMemoryRequirements(device->GetVkDevice(), stagingBufferHandle, &stagingBufferMemoryRequirements);
-
-		VkMemoryAllocateInfo allocInfo = CsySmallVk::memoryAllocateInfo();
-		allocInfo.allocationSize = stagingBufferMemoryRequirements.size;
-		allocInfo.memoryTypeIndex = findMemoryType(stagingBufferMemoryRequirements,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-		VK_CHECK_RESULT(vkAllocateMemory(device->GetVkDevice(), &allocInfo, NULL, &stagingBufferMemoryDeviceHandle));
-
-		// bind the memory to the buffer object
-		vkBindBufferMemory(device->GetVkDevice(), stagingBufferHandle, stagingBufferMemoryDeviceHandle, 0);
-
-		void* mappedMemory = NULL;
-		vkMapMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle, 0, stagingBufferMemoryRequirements.size, 0, &mappedMemory);
-
-		// set the initial particles data
-		std::vector<glm::vec2> initialParticlePosition(NUM_PARTICLES);
-		for (auto i = 0, x = 0, y = 0; i < NUM_PARTICLES; i++)
+		float xTemp = -0.625f + PARTICLE_RADIUS * 2 * x;
+		float yTemp = -1 + PARTICLE_RADIUS * 2 * y;
+		particles[particleIndex].pos = glm::vec2(xTemp, yTemp);
+		particles[particleIndex].vel = glm::vec2(0.0f);
+		particles[particleIndex].C = glm::mat2(0.0f);
+		particles[particleIndex].mass = 1.0f;
+		particles[particleIndex].volume_0 = 1.0f;
+		x++;
+		if (x >= 125)
 		{
-			initialParticlePosition[i].x = -0.625f + PARTICLE_RADIUS * 2 * x;
-			initialParticlePosition[i].y = -1 + PARTICLE_RADIUS * 2 * y;
-			x++;
-			if (x >= 125)
-			{
-				x = 0;
-				y++;
-			}
+			x = 0;
+			y++;
 		}
-		// zero all 
-		std::memset(mappedMemory, 0, bufferSize_);
-		std::memcpy(mappedMemory, initialParticlePosition.data(), positionBufferSize_);
-		vkUnmapMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle);
-
-		// submit a command buffer to copy staging buffer to the particle buffer 
-		VkCommandBuffer copyCommandBufferHandle;
-		VkCommandBufferAllocateInfo copyCommandBufferAllocationInfo = CsySmallVk::commandBufferAllocateInfo();
-		copyCommandBufferAllocationInfo.commandBufferCount = 1;
-		copyCommandBufferAllocationInfo.commandPool = computeCommandPool_;
-		copyCommandBufferAllocationInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		VK_CHECK_RESULT(vkAllocateCommandBuffers(device->GetVkDevice(), &copyCommandBufferAllocationInfo, &copyCommandBufferHandle));
-
-		VkCommandBufferBeginInfo commandBufferBeginInfo = CsySmallVk::commandBufferBeginInfo();
-		commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-		VK_CHECK_RESULT(vkBeginCommandBuffer(copyCommandBufferHandle, &commandBufferBeginInfo));
-
-		VkBufferCopy copyRegion = {};
-		copyRegion.size = stagingBufferMemoryRequirements.size;
-		vkCmdCopyBuffer(copyCommandBufferHandle, stagingBufferHandle, particlesBuffer_, 1, &copyRegion);
-		VK_CHECK_RESULT(vkEndCommandBuffer(copyCommandBufferHandle));
-
-		VkSubmitInfo submitInfo = CsySmallVk::submitInfo();
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &copyCommandBufferHandle;
-		submitInfo.waitSemaphoreCount = 0;
-		submitInfo.signalSemaphoreCount = 0;
-		VK_CHECK_RESULT(vkQueueSubmit(device->GetQueue(QueueFlags::Compute), 1, &submitInfo, VK_NULL_HANDLE));
-		VK_CHECK_RESULT(vkQueueWaitIdle(device->GetQueue(QueueFlags::Compute)));
-		vkFreeCommandBuffers(device->GetVkDevice(), computeCommandPool_, 1, &copyCommandBufferHandle);
-		vkFreeMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle, NULL);
-		vkDestroyBuffer(device->GetVkDevice(), stagingBufferHandle, NULL);
-		std::cout << "Successfully set initial particle data" << std::endl;
 	}
+
+	// zero all 
+	std::memset(mappedMemory, 0, particlesBufferSize_);
+	std::memcpy(mappedMemory, particles.data(), particlesBufferSize_);
+	vkUnmapMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle);
+
+	// submit a command buffer to copy staging buffer to the particle buffer 
+	VkCommandBuffer copyCommandBufferHandle;
+	VkCommandBufferAllocateInfo copyCommandBufferAllocationInfo = CsySmallVk::commandBufferAllocateInfo();
+	copyCommandBufferAllocationInfo.commandBufferCount = 1;
+	copyCommandBufferAllocationInfo.commandPool = computeCommandPool_;
+	copyCommandBufferAllocationInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	VK_CHECK_RESULT(vkAllocateCommandBuffers(device->GetVkDevice(), &copyCommandBufferAllocationInfo, &copyCommandBufferHandle));
+
+	VkCommandBufferBeginInfo commandBufferBeginInfo = CsySmallVk::commandBufferBeginInfo();
+	commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+	VK_CHECK_RESULT(vkBeginCommandBuffer(copyCommandBufferHandle, &commandBufferBeginInfo));
+
+	VkBufferCopy copyRegion = {};
+	copyRegion.size = stagingBufferMemoryRequirements.size;
+	vkCmdCopyBuffer(copyCommandBufferHandle, stagingBufferHandle, particlesBuffer_, 1, &copyRegion);
+	VK_CHECK_RESULT(vkEndCommandBuffer(copyCommandBufferHandle));
+
+	VkSubmitInfo submitInfo = CsySmallVk::submitInfo();
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &copyCommandBufferHandle;
+	submitInfo.waitSemaphoreCount = 0;
+	submitInfo.signalSemaphoreCount = 0;
+	VK_CHECK_RESULT(vkQueueSubmit(device->GetQueue(QueueFlags::Compute), 1, &submitInfo, VK_NULL_HANDLE));
+	VK_CHECK_RESULT(vkQueueWaitIdle(device->GetQueue(QueueFlags::Compute)));
+	vkFreeCommandBuffers(device->GetVkDevice(), computeCommandPool_, 1, &copyCommandBufferHandle);
+	vkFreeMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle, NULL);
+	vkDestroyBuffer(device->GetVkDevice(), stagingBufferHandle, NULL);
+	std::cout << "Successfully set initial particle data" << std::endl;
+}
+
+void SetInitialParticleData2()
+{
+	// staging buffer
+	VkBuffer stagingBufferHandle = VK_NULL_HANDLE;
+	VkDeviceMemory stagingBufferMemoryDeviceHandle = VK_NULL_HANDLE;
+	VkBufferCreateInfo stagingBufferCreateInfo = CsySmallVk::bufferCreateInfo();
+	stagingBufferCreateInfo.size = gridBufferSize_;
+	stagingBufferCreateInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	stagingBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	stagingBufferCreateInfo.queueFamilyIndexCount = 0;
+	stagingBufferCreateInfo.pQueueFamilyIndices = nullptr;
+
+	vkCreateBuffer(device->GetVkDevice(), &stagingBufferCreateInfo, NULL, &stagingBufferHandle);
+
+	VkMemoryRequirements stagingBufferMemoryRequirements;
+	vkGetBufferMemoryRequirements(device->GetVkDevice(), stagingBufferHandle, &stagingBufferMemoryRequirements);
+
+	VkMemoryAllocateInfo allocInfo = CsySmallVk::memoryAllocateInfo();
+	allocInfo.allocationSize = stagingBufferMemoryRequirements.size;
+	allocInfo.memoryTypeIndex = findMemoryType(stagingBufferMemoryRequirements,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	VK_CHECK_RESULT(vkAllocateMemory(device->GetVkDevice(), &allocInfo, NULL, &stagingBufferMemoryDeviceHandle));
+
+	// bind the memory to the buffer object
+	vkBindBufferMemory(device->GetVkDevice(), stagingBufferHandle, stagingBufferMemoryDeviceHandle, 0);
+
+	void* mappedMemory = NULL;
+	vkMapMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle, 0, stagingBufferMemoryRequirements.size, 0, &mappedMemory);
+
+	// Grid data
+	std::vector<Cell> grid(NUM_CELLS);
+	for (auto& cell : grid) {
+		cell.vel = glm::vec2(0.0f);
+		cell.mass = 0.0f;
+	}
+
+	// zero all 
+	std::memset(mappedMemory, 0, gridBufferSize_);
+	std::memcpy(mappedMemory, grid.data(), gridBufferSize_);
+	vkUnmapMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle);
+
+	// submit a command buffer to copy staging buffer to the particle buffer 
+	VkCommandBuffer copyCommandBufferHandle;
+	VkCommandBufferAllocateInfo copyCommandBufferAllocationInfo = CsySmallVk::commandBufferAllocateInfo();
+	copyCommandBufferAllocationInfo.commandBufferCount = 1;
+	copyCommandBufferAllocationInfo.commandPool = computeCommandPool_;
+	copyCommandBufferAllocationInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	VK_CHECK_RESULT(vkAllocateCommandBuffers(device->GetVkDevice(), &copyCommandBufferAllocationInfo, &copyCommandBufferHandle));
+
+	VkCommandBufferBeginInfo commandBufferBeginInfo = CsySmallVk::commandBufferBeginInfo();
+	commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+	VK_CHECK_RESULT(vkBeginCommandBuffer(copyCommandBufferHandle, &commandBufferBeginInfo));
+
+	VkBufferCopy copyRegion = {};
+	copyRegion.size = stagingBufferMemoryRequirements.size;
+	vkCmdCopyBuffer(copyCommandBufferHandle, stagingBufferHandle, particlesBuffer_, 1, &copyRegion);
+	VK_CHECK_RESULT(vkEndCommandBuffer(copyCommandBufferHandle));
+
+	VkSubmitInfo submitInfo = CsySmallVk::submitInfo();
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &copyCommandBufferHandle;
+	submitInfo.waitSemaphoreCount = 0;
+	submitInfo.signalSemaphoreCount = 0;
+	VK_CHECK_RESULT(vkQueueSubmit(device->GetQueue(QueueFlags::Compute), 1, &submitInfo, VK_NULL_HANDLE));
+	VK_CHECK_RESULT(vkQueueWaitIdle(device->GetQueue(QueueFlags::Compute)));
+	vkFreeCommandBuffers(device->GetVkDevice(), computeCommandPool_, 1, &copyCommandBufferHandle);
+	vkFreeMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle, NULL);
+	vkDestroyBuffer(device->GetVkDevice(), stagingBufferHandle, NULL);
+	std::cout << "Successfully set initial particle data" << std::endl;
+}
+
+void SetInitialParticleData3()
+{
+	// staging buffer
+	VkBuffer stagingBufferHandle = VK_NULL_HANDLE;
+	VkDeviceMemory stagingBufferMemoryDeviceHandle = VK_NULL_HANDLE;
+	VkBufferCreateInfo stagingBufferCreateInfo = CsySmallVk::bufferCreateInfo();
+	stagingBufferCreateInfo.size = fsBufferSize_;
+	stagingBufferCreateInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	stagingBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	stagingBufferCreateInfo.queueFamilyIndexCount = 0;
+	stagingBufferCreateInfo.pQueueFamilyIndices = nullptr;
+
+	vkCreateBuffer(device->GetVkDevice(), &stagingBufferCreateInfo, NULL, &stagingBufferHandle);
+
+	VkMemoryRequirements stagingBufferMemoryRequirements;
+	vkGetBufferMemoryRequirements(device->GetVkDevice(), stagingBufferHandle, &stagingBufferMemoryRequirements);
+
+	VkMemoryAllocateInfo allocInfo = CsySmallVk::memoryAllocateInfo();
+	allocInfo.allocationSize = stagingBufferMemoryRequirements.size;
+	allocInfo.memoryTypeIndex = findMemoryType(stagingBufferMemoryRequirements,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	VK_CHECK_RESULT(vkAllocateMemory(device->GetVkDevice(), &allocInfo, NULL, &stagingBufferMemoryDeviceHandle));
+
+	// bind the memory to the buffer object
+	vkBindBufferMemory(device->GetVkDevice(), stagingBufferHandle, stagingBufferMemoryDeviceHandle, 0);
+
+	void* mappedMemory = NULL;
+	vkMapMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle, 0, stagingBufferMemoryRequirements.size, 0, &mappedMemory);
+
+	// Fs data (deformation gradient)
+	std::vector<glm::mat2> fs(NUM_PARTICLE, glm::mat2(1.0f));
+
+	// zero all 
+	std::memset(mappedMemory, 0, fsBufferSize_);
+	std::memcpy(mappedMemory, fs.data(), fsBufferSize_);
+	vkUnmapMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle);
+
+	// submit a command buffer to copy staging buffer to the particle buffer 
+	VkCommandBuffer copyCommandBufferHandle;
+	VkCommandBufferAllocateInfo copyCommandBufferAllocationInfo = CsySmallVk::commandBufferAllocateInfo();
+	copyCommandBufferAllocationInfo.commandBufferCount = 1;
+	copyCommandBufferAllocationInfo.commandPool = computeCommandPool_;
+	copyCommandBufferAllocationInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	VK_CHECK_RESULT(vkAllocateCommandBuffers(device->GetVkDevice(), &copyCommandBufferAllocationInfo, &copyCommandBufferHandle));
+
+	VkCommandBufferBeginInfo commandBufferBeginInfo = CsySmallVk::commandBufferBeginInfo();
+	commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+	VK_CHECK_RESULT(vkBeginCommandBuffer(copyCommandBufferHandle, &commandBufferBeginInfo));
+
+	VkBufferCopy copyRegion = {};
+	copyRegion.size = stagingBufferMemoryRequirements.size;
+	vkCmdCopyBuffer(copyCommandBufferHandle, stagingBufferHandle, particlesBuffer_, 1, &copyRegion);
+	VK_CHECK_RESULT(vkEndCommandBuffer(copyCommandBufferHandle));
+
+	VkSubmitInfo submitInfo = CsySmallVk::submitInfo();
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &copyCommandBufferHandle;
+	submitInfo.waitSemaphoreCount = 0;
+	submitInfo.signalSemaphoreCount = 0;
+	VK_CHECK_RESULT(vkQueueSubmit(device->GetQueue(QueueFlags::Compute), 1, &submitInfo, VK_NULL_HANDLE));
+	VK_CHECK_RESULT(vkQueueWaitIdle(device->GetQueue(QueueFlags::Compute)));
+	vkFreeCommandBuffers(device->GetVkDevice(), computeCommandPool_, 1, &copyCommandBufferHandle);
+	vkFreeMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle, NULL);
+	vkDestroyBuffer(device->GetVkDevice(), stagingBufferHandle, NULL);
+	std::cout << "Successfully set initial particle data" << std::endl;
+}
+
 
 	void RunSimulation()
 	{
@@ -632,7 +812,7 @@ public:
 		title.precision(3);
 		title.setf(std::ios_base::fixed, std::ios_base::floatfield);
 		title << "Vulkan| "
-			<< NUM_PARTICLES << " particles | "
+			<< NUM_PARTICLE << " particles | "
 			"frame #" << frameNumber_ << " | "
 			"render latency: " << 1e-6 * total_frame_time_ns << " ms | "
 			"FPS: " << 1.0 / (1e-9 * total_frame_time_ns);
@@ -707,7 +887,9 @@ public:
 		CreateComputePipelines();
 		CreateComputeCommandPool();
 		CreateComputeCommandBuffer();
-		SetInitialParticleData();
+		SetInitialParticleData1();
+		SetInitialParticleData2();
+		SetInitialParticleData3();
 	}
 
 	~VulkanExample()
