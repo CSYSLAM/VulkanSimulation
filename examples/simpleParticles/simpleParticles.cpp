@@ -227,7 +227,7 @@ public:
 	void CreateDescriptorPool()
 	{
 		std::vector<VkDescriptorPoolSize> poolSizes = {
-			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 5),
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1),
 		};
 		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 1);
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device->GetVkDevice(), &descriptorPoolInfo, NULL, &globalDescriptorPool_));
@@ -282,7 +282,7 @@ public:
 
 
 		VkVertexInputBindingDescription vertexInputBindingDescription =
-			vks::initializers::vertexInputBindingDescription(0, sizeof(glm::vec2), VK_VERTEX_INPUT_RATE_VERTEX);
+			vks::initializers::vertexInputBindingDescription(0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX);
 
 		//layout(location = 0) in vec2 pos;
 		//layout(location = 1) in vec2 vel;
