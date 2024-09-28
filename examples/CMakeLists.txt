@@ -93,6 +93,7 @@ set(EXAMPLES
 	computeEulerFluid
 	computeMpm
 	simpleParticles
+	simpleParticles_useHead
 )
 
 buildExamples()
