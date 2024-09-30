@@ -134,17 +134,6 @@ public:
 		NULL
 	};
 
-	VkPipelineCache pipelineCache;
-	VkCommandPool commandPool;
-	VkCommandBuffer commandBuffer;
-	VkFence fence;
-	VkDescriptorPool descriptorPool;
-	VkDescriptorSetLayout descriptorSetLayout;
-	VkDescriptorSet descriptorSet;
-	VkPipelineLayout pipelineLayout;
-	VkPipeline pipeline;
-	VkShaderModule shaderModule;
-
 	const uint64_t bufferSize_ = NUM_PARTICLES * sizeof(Vertex);
 	const uint64_t bufferOffset_ = 0;
 
@@ -250,10 +239,20 @@ public:
 
 	void CreateBuffers()
 	{
-		VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-		VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-		BufferUtilsCsy::CreateBuffer(device, bufferSize_, usage, properties, particlesBuffer_, packedParticlesMemory_);
-		std::cout << "Successfully create buffers" << std::endl;
+		std::vector<Vertex> initialParticlePosition;
+		initialParticlePosition.reserve(NUM_PARTICLES);
+
+		for (int i = 0; i < NUM_PARTICLES; ++i) {
+			float f = static_cast<float>(i) / (NUM_PARTICLES / 10);
+			Vertex vertex;
+			vertex.pos = glm::vec2(2.0f * glm::fract(f) - 1.0f, 0.2f * glm::floor(f) - 1.0f);
+			vertex.vel = glm::vec2(0.0f);
+			initialParticlePosition.push_back(vertex);
+		}
+
+		BufferUtilsCsy::CreateBufferFromData(device, computeCommandPool_, initialParticlePosition.data(), NUM_PARTICLES * sizeof(Vertex),
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+			particlesBuffer_, packedParticlesMemory_);
 	}
 
 	void CreateGraphicsPipelineLayout()
@@ -479,81 +478,6 @@ public:
 		VK_CHECK_RESULT(vkEndCommandBuffer(computeCommandBuffer_));
 	}
 
-	void SetInitialParticleData()
-	{
-		// staging buffer
-		VkBuffer stagingBufferHandle = VK_NULL_HANDLE;
-		VkDeviceMemory stagingBufferMemoryDeviceHandle = VK_NULL_HANDLE;
-		VkBufferCreateInfo stagingBufferCreateInfo = CsySmallVk::bufferCreateInfo();
-		stagingBufferCreateInfo.size = bufferSize_;
-		stagingBufferCreateInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-		stagingBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		stagingBufferCreateInfo.queueFamilyIndexCount = 0;
-		stagingBufferCreateInfo.pQueueFamilyIndices = nullptr;
-
-		vkCreateBuffer(device->GetVkDevice(), &stagingBufferCreateInfo, NULL, &stagingBufferHandle);
-
-		VkMemoryRequirements stagingBufferMemoryRequirements;
-		vkGetBufferMemoryRequirements(device->GetVkDevice(), stagingBufferHandle, &stagingBufferMemoryRequirements);
-
-		VkMemoryAllocateInfo allocInfo = CsySmallVk::memoryAllocateInfo();
-		allocInfo.allocationSize = stagingBufferMemoryRequirements.size;
-		allocInfo.memoryTypeIndex = findMemoryType(stagingBufferMemoryRequirements,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-		VK_CHECK_RESULT(vkAllocateMemory(device->GetVkDevice(), &allocInfo, NULL, &stagingBufferMemoryDeviceHandle));
-
-		// bind the memory to the buffer object
-		vkBindBufferMemory(device->GetVkDevice(), stagingBufferHandle, stagingBufferMemoryDeviceHandle, 0);
-
-		void* mappedMemory = NULL;
-		vkMapMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle, 0, stagingBufferMemoryRequirements.size, 0, &mappedMemory);
-
-		std::vector<Vertex> initialParticlePosition;
-		initialParticlePosition.reserve(NUM_PARTICLES);
-
-		for (int i = 0; i < NUM_PARTICLES; ++i) {
-			float f = static_cast<float>(i) / (NUM_PARTICLES / 10);
-			Vertex vertex;
-			vertex.pos = glm::vec2(2.0f * glm::fract(f) - 1.0f, 0.2f * glm::floor(f) - 1.0f);
-			vertex.vel = glm::vec2(0.0f);
-			initialParticlePosition.push_back(vertex);
-		}
-
-		// zero all 
-		std::memset(mappedMemory, 0, bufferSize_);
-		std::memcpy(mappedMemory, initialParticlePosition.data(), bufferSize_);
-		vkUnmapMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle);
-
-		// submit a command buffer to copy staging buffer to the particle buffer 
-		VkCommandBuffer copyCommandBufferHandle;
-		VkCommandBufferAllocateInfo copyCommandBufferAllocationInfo = CsySmallVk::commandBufferAllocateInfo();
-		copyCommandBufferAllocationInfo.commandBufferCount = 1;
-		copyCommandBufferAllocationInfo.commandPool = computeCommandPool_;
-		copyCommandBufferAllocationInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		VK_CHECK_RESULT(vkAllocateCommandBuffers(device->GetVkDevice(), &copyCommandBufferAllocationInfo, &copyCommandBufferHandle));
-
-		VkCommandBufferBeginInfo commandBufferBeginInfo = CsySmallVk::commandBufferBeginInfo();
-		commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-		VK_CHECK_RESULT(vkBeginCommandBuffer(copyCommandBufferHandle, &commandBufferBeginInfo));
-
-		VkBufferCopy copyRegion = {};
-		copyRegion.size = stagingBufferMemoryRequirements.size;
-		vkCmdCopyBuffer(copyCommandBufferHandle, stagingBufferHandle, particlesBuffer_, 1, &copyRegion);
-		VK_CHECK_RESULT(vkEndCommandBuffer(copyCommandBufferHandle));
-
-		VkSubmitInfo submitInfo = CsySmallVk::submitInfo();
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &copyCommandBufferHandle;
-		submitInfo.waitSemaphoreCount = 0;
-		submitInfo.signalSemaphoreCount = 0;
-		VK_CHECK_RESULT(vkQueueSubmit(device->GetQueue(QueueFlags::Compute), 1, &submitInfo, VK_NULL_HANDLE));
-		VK_CHECK_RESULT(vkQueueWaitIdle(device->GetQueue(QueueFlags::Compute)));
-		vkFreeCommandBuffers(device->GetVkDevice(), computeCommandPool_, 1, &copyCommandBufferHandle);
-		vkFreeMemory(device->GetVkDevice(), stagingBufferMemoryDeviceHandle, NULL);
-		vkDestroyBuffer(device->GetVkDevice(), stagingBufferHandle, NULL);
-		std::cout << "Successfully set initial particle data" << std::endl;
-	}
-
 	void RunSimulation()
 	{
 		// 更新每帧变量
@@ -678,6 +602,7 @@ public:
 		CreateSwapchainFrameBuffers();
 		CreatePipelineCache();
 		CreateDescriptorPool();
+		CreateComputeCommandPool();
 		CreateBuffers();
 		CreateGraphicsPipelineLayout();
 		CreateGraphicsPipeline();
@@ -688,8 +613,6 @@ public:
 		UpdateComputeDescriptorSets();
 		CreateComputePipelineLayout();
 		CreateComputePipelines();
-		CreateComputeCommandPool();
-		SetInitialParticleData();
 
 		VkCommandBufferAllocateInfo allocInfo =
 			vks::initializers::commandBufferAllocateInfo(computeCommandPool_, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
