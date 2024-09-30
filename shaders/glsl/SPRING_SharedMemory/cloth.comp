@@ -1,5 +1,4 @@
 #version 450
-#extension GL_EXT_shader_atomic_float : enable
 
 struct Particle {
 	vec4 pos;
@@ -12,9 +11,13 @@ layout(std430, binding = 0) buffer ParticleIn {
 	Particle particleIn[ ];
 };
 
+layout(std430, binding = 1) buffer ParticleOut {
+	Particle particleOut[ ];
+};
+
 layout (local_size_x = 10, local_size_y = 10) in;
 
-layout (binding = 1) uniform UBO 
+layout (binding = 2) uniform UBO 
 {
 	float deltaT;
 	float particleMass;
@@ -33,6 +36,8 @@ layout (push_constant) uniform PushConsts {
 	uint calculateNormals;
 } pushConsts;
 
+shared vec4 sharedPositions[10][10];
+
 vec3 springForce(vec3 p0, vec3 p1, float restDist) 
 {
 	vec3 dist = p0 - p1;
@@ -47,110 +52,93 @@ void main()
 	if (index > params.particleCount.x * params.particleCount.y) 
 		return;
 
+	// Load particle positions into shared memory
+	uint localX = gl_LocalInvocationID.x;
+	uint localY = gl_LocalInvocationID.y;
+	sharedPositions[localY][localX] = particleIn[index].pos;
+
+	// Synchronize to ensure all positions are loaded
+	barrier();
+
 	// Initial force from gravity
 	vec3 force = params.gravity.xyz * params.particleMass;
 
-	vec3 pos = particleIn[index].pos.xyz;
+	vec3 pos = sharedPositions[localY][localX].xyz;
 	vec3 vel = particleIn[index].vel.xyz;
 
 	// Spring forces from neighboring particles
-	// left
-	if (id.x > 0) {
-		force += springForce(particleIn[index-1].pos.xyz, pos, params.restDistH);
-	} 
-	// right
-	if (id.x < params.particleCount.x - 1) {
-		force += springForce(particleIn[index + 1].pos.xyz, pos, params.restDistH);
-	}
-	// upper
-	if (id.y < params.particleCount.y - 1) {
-		force += springForce(particleIn[index + params.particleCount.x].pos.xyz, pos, params.restDistV);
-	} 
-	// lower
-	if (id.y > 0) {
-		force += springForce(particleIn[index - params.particleCount.x].pos.xyz, pos, params.restDistV);
-	} 
-	// upper-left
-	if ((id.x > 0) && (id.y < params.particleCount.y - 1)) {
-		force += springForce(particleIn[index + params.particleCount.x - 1].pos.xyz, pos, params.restDistD);
-	}
-	// lower-left
-	if ((id.x > 0) && (id.y > 0)) {
-		force += springForce(particleIn[index - params.particleCount.x - 1].pos.xyz, pos, params.restDistD);
-	}
-	// upper-right
-	if ((id.x < params.particleCount.x - 1) && (id.y < params.particleCount.y - 1)) {
-		force += springForce(particleIn[index + params.particleCount.x + 1].pos.xyz, pos, params.restDistD);
-	}
-	// lower-right
-	if ((id.x < params.particleCount.x - 1) && (id.y > 0)) {
-		force += springForce(particleIn[index - params.particleCount.x + 1].pos.xyz, pos, params.restDistD);
-	}
+	// 左侧
+	force += springForce(mix(particleIn[index-1].pos.xyz, sharedPositions[localY][localX-1].xyz, float(localX > 0)), pos, params.restDistH) * float(id.x > 0);
+
+	// 右侧
+	force += springForce(mix(particleIn[index+1].pos.xyz, sharedPositions[localY][localX+1].xyz, float(localX < 9)), pos, params.restDistH) * float(id.x < params.particleCount.x - 1);
+
+	// 上方
+	force += springForce(mix(particleIn[index + params.particleCount.x].pos.xyz, sharedPositions[localY+1][localX].xyz, float(localY < 9)), pos, params.restDistV) * float(id.y < params.particleCount.y - 1);
+
+	// 下方
+	force += springForce(mix(particleIn[index - params.particleCount.x].pos.xyz, sharedPositions[localY-1][localX].xyz, float(localY > 0)), pos, params.restDistV) * float(id.y > 0);
+
+	// 左上
+	force += springForce(mix(particleIn[index + params.particleCount.x - 1].pos.xyz, sharedPositions[localY+1][localX-1].xyz, float(localX > 0 && localY < 9)), pos, params.restDistD) * float(id.x > 0 && id.y < params.particleCount.y - 1);
+
+	// 左下
+	force += springForce(mix(particleIn[index - params.particleCount.x - 1].pos.xyz, sharedPositions[localY-1][localX-1].xyz, float(localX > 0 && localY > 0)), pos, params.restDistD) * float(id.x > 0 && id.y > 0);
+
+	// 右上
+	force += springForce(mix(particleIn[index + params.particleCount.x + 1].pos.xyz, sharedPositions[localY+1][localX+1].xyz, float(localX < 9 && localY < 9)), pos, params.restDistD) * float(id.x < params.particleCount.x - 1 && id.y < params.particleCount.y - 1);
+
+	// 右下
+	force += springForce(mix(particleIn[index - params.particleCount.x + 1].pos.xyz, sharedPositions[localY-1][localX+1].xyz, float(localX < 9 && localY > 0)), pos, params.restDistD) * float(id.x < params.particleCount.x - 1 && id.y > 0);
 
 	force += (-params.damping * vel);
 
 	// Integrate
 	vec3 f = force * (1.0 / params.particleMass);
-
-    vec4 newPos = vec4(pos + vel * params.deltaT + 0.5 * f * params.deltaT * params.deltaT, 1.0);
-    vec4 newVel = vec4(vel + f * params.deltaT, 0.0);
-
-    // 使用原子操作更新位置和速度
-    atomicAdd(particleIn[index].pos.x, newPos.x - particleIn[index].pos.x);
-    atomicAdd(particleIn[index].pos.y, newPos.y - particleIn[index].pos.y);
-    atomicAdd(particleIn[index].pos.z, newPos.z - particleIn[index].pos.z);
-    atomicAdd(particleIn[index].pos.w, newPos.w - particleIn[index].pos.w);
-
-    atomicAdd(particleIn[index].vel.x, newVel.x - particleIn[index].vel.x);
-    atomicAdd(particleIn[index].vel.y, newVel.y - particleIn[index].vel.y);
-    atomicAdd(particleIn[index].vel.z, newVel.z - particleIn[index].vel.z);
-    atomicAdd(particleIn[index].vel.w, newVel.w - particleIn[index].vel.w);
-
-
-	// particleIn[index].pos = vec4(pos + vel * params.deltaT + 0.5 * f * params.deltaT * params.deltaT, 1.0);
-	// particleIn[index].vel = vec4(vel + f * params.deltaT, 0.0);
+	particleOut[index].pos = vec4(pos + vel * params.deltaT + 0.5 * f * params.deltaT * params.deltaT, 1.0);
+	particleOut[index].vel = vec4(vel + f * params.deltaT, 0.0);
 
 	// Sphere collision
-	vec3 sphereDist = particleIn[index].pos.xyz - params.spherePos.xyz;
+	vec3 sphereDist = particleOut[index].pos.xyz - params.spherePos.xyz;
 	if (length(sphereDist) < params.sphereRadius + 0.01) {
-		// // If the particle is inside the sphere, push it to the outer radius
-		// particleIn[index].pos.xyz = params.spherePos.xyz + normalize(sphereDist) * (params.sphereRadius + 0.01);		
-		// // Cancel out velocity
-		// particleIn[index].vel = vec4(0.0);
+		// If the particle is inside the sphere, push it to the outer radius
+		particleOut[index].pos.xyz = params.spherePos.xyz + normalize(sphereDist) * (params.sphereRadius + 0.01);		
+		// Cancel out velocity
+		particleOut[index].vel = vec4(0.0);
 	}
 
 	// Normals
 	if (pushConsts.calculateNormals == 1) {
-		// vec3 normal = vec3(0.0);
-		// vec3 a, b, c;
-		// if (id.y > 0) {
-		// 	if (id.x > 0) {
-		// 		a = particleIn[index - 1].pos.xyz - pos;
-		// 		b = particleIn[index - params.particleCount.x - 1].pos.xyz - pos;
-		// 		c = particleIn[index - params.particleCount.x].pos.xyz - pos;
-		// 		normal += cross(a,b) + cross(b,c);
-		// 	}
-		// 	if (id.x < params.particleCount.x - 1) {
-		// 		a = particleIn[index - params.particleCount.x].pos.xyz - pos;
-		// 		b = particleIn[index - params.particleCount.x + 1].pos.xyz - pos;
-		// 		c = particleIn[index + 1].pos.xyz - pos;
-		// 		normal += cross(a,b) + cross(b,c);
-		// 	}
-		// }
-		// if (id.y < params.particleCount.y - 1) {
-		// 	if (id.x > 0) {
-		// 		a = particleIn[index + params.particleCount.x].pos.xyz - pos;
-		// 		b = particleIn[index + params.particleCount.x - 1].pos.xyz - pos;
-		// 		c = particleIn[index - 1].pos.xyz - pos;
-		// 		normal += cross(a,b) + cross(b,c);
-		// 	}
-		// 	if (id.x < params.particleCount.x - 1) {
-		// 		a = particleIn[index + 1].pos.xyz - pos;
-		// 		b = particleIn[index + params.particleCount.x + 1].pos.xyz - pos;
-		// 		c = particleIn[index + params.particleCount.x].pos.xyz - pos;
-		// 		normal += cross(a,b) + cross(b,c);
-		// 	}
-		// }
-		// particleIn[index].normal = vec4(normalize(normal), 0.0f);
+		vec3 normal = vec3(0.0);
+		vec3 a, b, c;
+		if (id.y > 0) {
+			if (id.x > 0) {
+				a = particleIn[index - 1].pos.xyz - pos;
+				b = particleIn[index - params.particleCount.x - 1].pos.xyz - pos;
+				c = particleIn[index - params.particleCount.x].pos.xyz - pos;
+				normal += cross(a,b) + cross(b,c);
+			}
+			if (id.x < params.particleCount.x - 1) {
+				a = particleIn[index - params.particleCount.x].pos.xyz - pos;
+				b = particleIn[index - params.particleCount.x + 1].pos.xyz - pos;
+				c = particleIn[index + 1].pos.xyz - pos;
+				normal += cross(a,b) + cross(b,c);
+			}
+		}
+		if (id.y < params.particleCount.y - 1) {
+			if (id.x > 0) {
+				a = particleIn[index + params.particleCount.x].pos.xyz - pos;
+				b = particleIn[index + params.particleCount.x - 1].pos.xyz - pos;
+				c = particleIn[index - 1].pos.xyz - pos;
+				normal += cross(a,b) + cross(b,c);
+			}
+			if (id.x < params.particleCount.x - 1) {
+				a = particleIn[index + 1].pos.xyz - pos;
+				b = particleIn[index + params.particleCount.x + 1].pos.xyz - pos;
+				c = particleIn[index + params.particleCount.x].pos.xyz - pos;
+				normal += cross(a,b) + cross(b,c);
+			}
+		}
+		particleOut[index].normal = vec4(normalize(normal), 0.0f);
 	}
 }

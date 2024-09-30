@@ -61,8 +61,8 @@ CommandLineParser commandLineParser;
 class VulkanExample
 {
 public:
-	uint32_t windowHeight_ = 1000;
-	uint32_t windowWidth_ = 1000;
+	uint32_t windowHeight_ = 720;
+	uint32_t windowWidth_ = 1280;
 	bool paused_ = false;
 	std::atomic_uint64_t frameNumber_ = 1;
 
@@ -341,7 +341,7 @@ public:
 				vks::initializers::commandBufferAllocateInfo(graphicsCommandPool_, VK_COMMAND_BUFFER_LEVEL_PRIMARY, static_cast<uint32_t>(graphicsCommandBuffer_.size()));
 		VK_CHECK_RESULT(vkAllocateCommandBuffers(device->GetVkDevice(), &graphicsCommandBufferAllocationInfo, graphicsCommandBuffer_.data()));
 		
-		VkClearValue clearValues{ 0.92f, 0.92f, 0.92f, 1.0f };
+		VkClearValue clearValues{ 0.0f, 0.0f, 0.0f, 1.0f };
 		VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
 		renderPassBeginInfo.renderPass = renderPass_;
 		renderPassBeginInfo.renderArea.offset.x = 0;
