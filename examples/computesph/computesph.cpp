@@ -61,8 +61,8 @@ CommandLineParser commandLineParser;
 class VulkanExample
 {
 public:
-	uint32_t windowHeight_ = 1000;
-	uint32_t windowWidth_ = 1000;
+	uint32_t windowHeight_ = 720;
+	uint32_t windowWidth_ = 1280;
 	bool paused_ = false;
 	std::atomic_uint64_t frameNumber_ = 1;
 

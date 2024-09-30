@@ -265,9 +265,8 @@ public:
 
 		// Initial particle positions and velocity
 		for (int i = 0; i < NUM_PARTICLES; ++i) {
-			float f = static_cast<float>(i) / (NUM_PARTICLES / 10);
 			Vertex vertex;
-			vertex.pos = glm::vec2(2.0f * glm::fract(f) - 1.0f, 0.2f * glm::floor(f) - 1.0f);
+			vertex.pos = glm::vec2(rndDist(rndEngine), rndDist(rndEngine));
 			vertex.vel = glm::vec2(0.0f);
 			particleBuffer.push_back(vertex);
 		}
