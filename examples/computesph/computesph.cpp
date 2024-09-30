@@ -121,17 +121,6 @@ public:
 		NULL
 	};
 
-	VkPipelineCache pipelineCache;
-	VkCommandPool commandPool;
-	VkCommandBuffer commandBuffer;
-	VkFence fence;
-	VkDescriptorPool descriptorPool;
-	VkDescriptorSetLayout descriptorSetLayout;
-	VkDescriptorSet descriptorSet;
-	VkPipelineLayout pipelineLayout;
-	VkPipeline pipeline;
-	VkShaderModule shaderModule;
-
 	// ssbo sizes
 	const uint64_t positionBufferSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
 	const uint64_t velocityBufferSize_ = sizeof(glm::vec2) * NUM_PARTICLES;
