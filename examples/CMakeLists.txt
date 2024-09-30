@@ -94,6 +94,8 @@ set(EXAMPLES
 	computeMpm
 	simpleParticles
 	simpleParticles_useHead
+        MPMFluid
+	sph_useHead
 )
 
 buildExamples()
