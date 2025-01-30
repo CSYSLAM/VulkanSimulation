@@ -6,7 +6,7 @@ function(buildExample EXAMPLE_NAME)
 	SET(EXAMPLE_FOLDER ${CMAKE_CURRENT_SOURCE_DIR}/${EXAMPLE_NAME})
 	message(STATUS "Generating project file for example in ${EXAMPLE_FOLDER}")
 	# Main
-	file(GLOB SOURCE *.cpp ${BASE_HEADERS} ${EXAMPLE_FOLDER}/*.cpp ${EXAMPLE_FOLDER}/*.h)
+	file(GLOB SOURCE *.cpp ${BASE_HEADERS} ${CSY_VK_BASE_HEADERS} ${EXAMPLE_FOLDER}/*.cpp ${EXAMPLE_FOLDER}/*.h)
 	SET(MAIN_CPP ${EXAMPLE_FOLDER}/${EXAMPLE_NAME}.cpp)
 	if(EXISTS ${EXAMPLE_FOLDER}/main.cpp)
 		SET(MAIN_CPP ${EXAMPLE_FOLDER}/main.cpp)
@@ -34,10 +34,10 @@ function(buildExample EXAMPLE_NAME)
 	file(GLOB README_FILES "${EXAMPLE_FOLDER}/*.md")
 	if(WIN32)
 		add_executable(${EXAMPLE_NAME} WIN32 ${MAIN_CPP} ${SOURCE} ${MAIN_HEADER} ${SHADERS_GLSL} ${SHADERS_HLSL} ${README_FILES})
-		target_link_libraries(${EXAMPLE_NAME} base ${Vulkan_LIBRARY} ${WINLIBS})
+		target_link_libraries(${EXAMPLE_NAME} base csyvkbase ${Vulkan_LIBRARY} ${WINLIBS})
 	else(WIN32)
 		add_executable(${EXAMPLE_NAME} ${MAIN_CPP} ${SOURCE} ${MAIN_HEADER} ${SHADERS_GLSL} ${SHADERS_HLSL} ${README_FILES})
-		target_link_libraries(${EXAMPLE_NAME} base )
+		target_link_libraries(${EXAMPLE_NAME} base csyvkbase )
 	endif(WIN32)
 
 	file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
@@ -85,7 +85,7 @@ endfunction(buildExamples)
 
 set(EXAMPLES
 	computeclothPBD
-        computeclothSPRING
+    computeclothSPRING
 	computeclothPBDonlydistcons
 	computeclothPBDNeoHook
 	SPRING_SharedMemory
@@ -93,8 +93,9 @@ set(EXAMPLES
 	computeEulerFluid
 	simpleParticles
 	simpleParticles_useHead
-        MPMFluid
+    MPMFluid
 	sph_useHead
+	simpleDemoForCsyVk
 )
 
 buildExamples()
