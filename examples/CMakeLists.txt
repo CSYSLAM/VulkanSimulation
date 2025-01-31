@@ -96,6 +96,7 @@ set(EXAMPLES
     MPMFluid
 	sph_useHead
 	simpleDemoForCsyVk
+	simpleDemoNoCsyVk
 )
 
 buildExamples()
