@@ -18,8 +18,11 @@
 #include "VkContext.h"
 #include "VkProgram.h"
 #include "Array.h"
+#include"VulkanTools.h"
 
 using namespace CsyVk;
+
+std::string shaderDir = getShaderBasePath() + "glsl/simpleDemoForCsyVk/VecAdd.comp.spv";
 
 /**
  * This example is used to demonstrate how to use native APIs in Vulkan to add two arrays in parallel
@@ -226,11 +229,10 @@ int main(int argc, char* argv[])
 
 	// Create pipeline
 	VkComputePipelineCreateInfo computePipelineCreateInfo = csyvk::initializers::computePipelineCreateInfo(pipelineLayout, 0);
-	std::string fileName = "C:/temp/CG/Code/VulkanSimulation/shaders/glsl/simpleDemoForCsyVk/VecAdd.comp.spv";
 	VkPipelineShaderStageCreateInfo shaderStage = {};
 	shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	shaderStage.module = csyvk::tools::loadShaderModule(fileName, ctx->deviceHandle());
+	shaderStage.module = csyvk::tools::loadShaderModule(shaderDir, ctx->deviceHandle());
 	shaderStage.pName = "main";
 	assert(shaderStage.module != VK_NULL_HANDLE);
 	computePipelineCreateInfo.stage = shaderStage;

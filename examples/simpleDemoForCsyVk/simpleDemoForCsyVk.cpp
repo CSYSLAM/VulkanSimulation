@@ -13,7 +13,11 @@
 #include "Array.h"
 #include "VkProgram.h"
 
+#include"VulkanTools.h"
+
 using namespace CsyVk;
+
+std::string shaderDir = getShaderBasePath() + "glsl/simpleDemoForCsyVk/VecAdd.comp.spv";
 
 /**
  * This example demonstrates how to use the wrapped api for vulkan to ease the programming
@@ -49,7 +53,7 @@ int main(int argc, char* argv[])
 		BUFFER(float),		//Array B
 		BUFFER(float),		//Array C
 		CONSTANT(uint));
-	kernel->load("C:/temp/CG/Code/VulkanSimulation/shaders/glsl/simpleDemoForCsyVk/VecAdd.comp.spv");
+	kernel->load(shaderDir);
 
 	//Execuate the kernel
 	VkConstant<uint> N(num);
@@ -66,6 +70,6 @@ int main(int argc, char* argv[])
 	{
 		printf("%f \n", hC[i]);
 	}
-
+	system("pause");
 	return 0;
 }
