@@ -93,10 +93,12 @@ set(EXAMPLES
 	computeEulerFluid
 	simpleParticles
 	simpleParticles_useHead
-    MPMFluid
+    	MPMFluid
 	sph_useHead
 	simpleDemoForCsyVk
 	simpleDemoNoCsyVk
+	simpleParticles_useCsyVk
+	nativeVulkanDemo
 )
 
 buildExamples()
