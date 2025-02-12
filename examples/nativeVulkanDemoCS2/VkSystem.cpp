@@ -1,6 +1,5 @@
 #include "VkSystem.h"
 #include "VkTools.h"
-#include "VkDebug.h"
 #include "VkContext.h"
 
 #include <iostream>
