@@ -262,7 +262,7 @@ namespace csyvk
 			}
 			else
 			{
-				std::cerr << "Error: Could not open shader file \"" << fileName << "\"" << "\n";
+				// Error: Could not open shader file;
 				return VK_NULL_HANDLE;
 			}
 		}

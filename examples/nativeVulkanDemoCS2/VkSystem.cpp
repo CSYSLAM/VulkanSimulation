@@ -155,7 +155,7 @@ namespace CsyVk {
 				// Output message if requested extension is not available
 				if (std::find(supportedInstanceExtensions.begin(), supportedInstanceExtensions.end(), enabledExtension) == supportedInstanceExtensions.end())
 				{
-					std::cerr << "Enabled instance extension \"" << enabledExtension << "\" is not present at instance level\n";
+					// Enabled instance extension enabledExtension is not present at instance level;
 				}
 				instanceExtensions.push_back(enabledExtension);
 			}
@@ -221,7 +221,7 @@ namespace CsyVk {
 				instanceCreateInfo.pNext = &debugCreateInfo;
 			}
 			else {
-				// std::cerr << "Validation layer VK_LAYER_KHRONOS_validation not present, validation is disabled";
+				// Validation layer VK_LAYER_KHRONOS_validation not present, validation is disabled;
 				instanceCreateInfo.enabledLayerCount = 0;
 				instanceCreateInfo.pNext = nullptr;
 			}			
@@ -235,7 +235,7 @@ namespace CsyVk {
 				VkResult r = func(vkInstance, &debugCreateInfo, nullptr, &debugUtilsMessenger);
 
 				if (r != VK_SUCCESS) {
-					// std::cerr << "Failed to create VkDebugUtilsMessengerEXT" << std::endl;
+					// Failed to create VkDebugUtilsMessengerEXT;
 				}
 			}
 		}

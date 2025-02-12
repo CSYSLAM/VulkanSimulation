@@ -33,27 +33,15 @@
 #define DEFAULT_FENCE_TIMEOUT 100000000000
 
 // Macro to check and display Vulkan return results
-#if defined(__ANDROID__)
 #define VK_CHECK_RESULT(f)																				\
 {																										\
 	VkResult res = (f);																					\
 	if (res != VK_SUCCESS)																				\
 	{																									\
-		LOGE("Fatal : VkResult is \" %s \" in %s at line %d", csyvk::tools::errorString(res).c_str(), __FILE__, __LINE__); \
 		assert(res == VK_SUCCESS);																		\
 	}																									\
 }
-#else
-#define VK_CHECK_RESULT(f)																				\
-{																										\
-	VkResult res = (f);																					\
-	if (res != VK_SUCCESS)																				\
-	{																									\
-		std::cout << "Fatal : VkResult is \"" << csyvk::tools::errorString(res) << "\" in " << __FILE__ << " at line " << __LINE__ << "\n"; \
-		assert(res == VK_SUCCESS);																		\
-	}																									\
-}
-#endif
+
 
 template<typename T>
 std::string getDynamicSpvFile(const std::string &fileName)
@@ -71,7 +59,6 @@ std::string getDynamicSpvFile(const std::string &fileName)
     unsigned int suffixPos = outFileName.rfind(suffix);
     if (suffixPos != (outFileName.length() - suffix.length()))
     {
-        // suffix not ".comp.spv", return origin filename
         return fileName;
     }
 

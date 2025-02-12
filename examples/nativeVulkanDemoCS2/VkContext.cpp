@@ -231,7 +231,7 @@ namespace CsyVk {
 			for (const char* enabledExtension : deviceExtensions)
 			{
 				if (!extensionSupported(enabledExtension)) {
-					std::cerr << "Enabled device extension \"" << enabledExtension << "\" is not present at device level\n";
+					// Enabled device extension enabledExtension is not present at device level
 				}
 			}
 
