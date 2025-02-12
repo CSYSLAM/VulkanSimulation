@@ -95,6 +95,8 @@ set(EXAMPLES
 	simpleParticles_useHead
         MPMFluid
 	sph_useHead
+	nativeVulkanDemoCS
+	nativeVulkanDemoCS2
 )
 
 buildExamples()

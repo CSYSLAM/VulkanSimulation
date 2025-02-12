@@ -1,0 +1,59 @@
+#pragma once
+#include "vk_native_variable.h"
+#include "vk_native_buffer.h"
+
+namespace CsyVkN {
+	template<typename T>
+	class VkUniform : public VkVariable
+	{
+	public:
+		VkUniform();
+		~VkUniform();
+
+		void setValue(T val);
+
+		VariableType type() override;
+
+		uint32_t bufferSize() override { return sizeof(T); }
+
+	protected:
+	};
+
+	template<typename T>
+	VkUniform<T>::VkUniform()
+		: VkVariable()
+	{
+		if (ctx->useMemoryPool) {
+			buffer->size = sizeof(T);
+			buffer->usageFlags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+			buffer->memoryPropertyFlags =
+					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+			ctx->createBuffer(VkContext::UniformPool, buffer);
+		} else {
+			ctx->createBuffer(
+					VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+					buffer,
+					sizeof(T));
+		}
+		VK_CHECK_RESULT(buffer->map());
+	}
+
+	template<typename T>
+	VkUniform<T>::~VkUniform()
+	{
+		buffer->destroy();
+	}
+
+	template<typename T>
+	void VkUniform<T>::setValue(T val)
+	{
+		memcpy(buffer->mapped, &val, sizeof(T));
+	}
+
+	template<typename T>
+	VariableType VkUniform<T>::type()
+	{
+		return VariableType::Uniform;
+	}
+}
