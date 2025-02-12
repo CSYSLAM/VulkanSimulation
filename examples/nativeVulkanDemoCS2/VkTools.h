@@ -132,16 +132,8 @@ namespace csyvk
 			VkImageSubresourceRange subresourceRange);
 
 		VkShaderModule loadShaderModule(const std::string fileName, VkDevice device);
-		VkShaderModule loadShaderModule(const std::string& fileName, const std::map<std::string, std::string>& macros, const std::string& MD5Encode, VkDevice device);
-
-		// Load a SPIR-V shader (binary)
-#if defined(__ANDROID__)
-		VkShaderModule loadShader(AAssetManager* assetManager, const char *fileName, VkDevice device);
-		VkShaderModule loadShader(AAssetManager* assetManager, const std::string& fileName, const std::map<std::string, std::string>& macros, const std::string& MD5EnCode, VkDevice device);
-#else
 		VkShaderModule loadShader(const char *fileName, VkDevice device);
-		VkShaderModule loadShader(const std::string &fileName, const std::map<std::string, std::string> &macros, const std::string &MD5Encode, VkDevice device);
-#endif
+
 
 		/** @brief Checks if a file exists */
 		bool fileExists(const std::string &filename);
