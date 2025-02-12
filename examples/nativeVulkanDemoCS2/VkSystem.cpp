@@ -36,41 +36,16 @@ namespace CsyVk {
 	bool VkSystem::initialize(bool enableValidation)
 	{
 		validation = enableValidation;
-
-#if !defined(VK_USE_PLATFORM_ANDROID_KHR)
-		// To enable Vulkan/OpenGL interop
-		enabledInstanceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
-		enabledInstanceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME);
-
-		enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
-		enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME);
-#ifdef WIN32
-		enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
-		enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME);
-#else
-		enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
-		enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
-#endif
-#endif
-
 		VkResult err;
 
 		// Vulkan instance
 		err = createVulkanInstance();
 		if (err) {
-			csyvk::tools::exitFatal("Could not create Vulkan instance : \n" + csyvk::tools::errorString(err), err);
 			return false;
 		}
 
 		// If requested, we enable the default validation layers for debugging
-		if (validation)
-		{
-			// The report flags determine what type of messages for the layers will be displayed
-			// For validating (debugging) an application the error and warning bits should suffice
-			//VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
-			// Additional flags include performance info, loader and layer debug messages, etc.
-			//csyvk::debug::setupDebugging(vkInstance, debugReportFlags, VK_NULL_HANDLE);
-		}
+		if (validation) {}
 
 		// Physical device
 		uint32_t gpuCount = 0;
@@ -81,7 +56,7 @@ namespace CsyVk {
 		std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
 		err = vkEnumeratePhysicalDevices(vkInstance, &gpuCount, physicalDevices.data());
 		if (err) {
-			csyvk::tools::exitFatal("Could not enumerate physical devices : \n" + csyvk::tools::errorString(err), err);
+			// Could not enumerate physical devices
 			return false;
 		}
 
@@ -98,23 +73,17 @@ namespace CsyVk {
 		vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
 		vkGetPhysicalDeviceMemoryProperties(physicalDevice, &deviceMemoryProperties);
 
-		// Derived examples can override this to set actual features (based on above readings) to enable for logical device creation
-		//getEnabledFeatures();
-
-		// Vulkan device creation
-		// This is handled by a separate class that gets a logical device representation
-		// and encapsulates functions related to a device
 		ctx = new VkContext(physicalDevice);
 		VkResult res = ctx->createLogicalDevice(enabledFeatures, enabledDeviceExtensions, deviceCreatepNextChain);
 		if (res != VK_SUCCESS) {
-			csyvk::tools::exitFatal("Could not create Vulkan device: \n" + csyvk::tools::errorString(res), res);
+			// Could not create Vulkan device
 			return false;
 		}
 
 		if (useMemoryPool) {
 			res = ctx->createMemoryPool(vkInstance, apiVersion);
 			if (res != VK_SUCCESS) {
-				csyvk::tools::exitFatal("Could not create Vulkan memory pool: \n" + csyvk::tools::errorString(res), res);
+				// Could not create Vulkan memory pool
 				return false;
 			}
 		}
@@ -128,28 +97,6 @@ namespace CsyVk {
 		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
 		void* pUserData)
 	{
-		// Select prefix depending on flags passed to the callback
-		const char* prefix = "\033[0;31mUNKNOWN\033[0m";
-
-		if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) {
-			prefix = "\033[0;34mVERBOSE\033[0m";
-		}
-		else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
-			prefix = "\033[0;32mINFO   \033[0m";
-		}
-		else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-			prefix = "\033[0;33mWARNING\033[0m";
-		}
-		else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-			prefix = "\033[0;31mERROR  \033[0m";
-		}
-
-
-		printf("[%s][%d][%s] : %s\n", prefix, pCallbackData->messageIdNumber, pCallbackData->pMessageIdName, pCallbackData->pMessage);
-
-		// The return value of this callback controls whether the Vulkan call that caused the validation message will be aborted or not
-		// We return VK_FALSE as we DON'T want Vulkan calls that cause a validation message to abort
-		// If you instead want to have calls abort, pass in VK_TRUE and the function will return VK_ERROR_VALIDATION_FAILED_EXT 
 		return VK_FALSE;
 	}
 
@@ -256,10 +203,7 @@ namespace CsyVk {
 
 		if (validation)
 		{
-			// The VK_LAYER_KHRONOS_validation contains all current validation functionality.
-			// Note that on Android this layer requires at least NDK r20
 			const char* validationLayerName = "VK_LAYER_KHRONOS_validation";
-			// Check if this layer is available at instance level
 			uint32_t instanceLayerCount;
 			vkEnumerateInstanceLayerProperties(&instanceLayerCount, nullptr);
 			std::vector<VkLayerProperties> instanceLayerProperties(instanceLayerCount);
@@ -277,7 +221,7 @@ namespace CsyVk {
 				instanceCreateInfo.pNext = &debugCreateInfo;
 			}
 			else {
-				std::cerr << "Validation layer VK_LAYER_KHRONOS_validation not present, validation is disabled";
+				// std::cerr << "Validation layer VK_LAYER_KHRONOS_validation not present, validation is disabled";
 				instanceCreateInfo.enabledLayerCount = 0;
 				instanceCreateInfo.pNext = nullptr;
 			}			
@@ -285,14 +229,13 @@ namespace CsyVk {
 		VkResult result = vkCreateInstance(&instanceCreateInfo, nullptr, &vkInstance);
 
 		if (result == VK_SUCCESS && validation) {
-			// create debug message callback
 			auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(vkInstance, "vkCreateDebugUtilsMessengerEXT");
 
 			if (func != nullptr) {
 				VkResult r = func(vkInstance, &debugCreateInfo, nullptr, &debugUtilsMessenger);
 
 				if (r != VK_SUCCESS) {
-					std::cerr << "Failed to create VkDebugUtilsMessengerEXT" << std::endl;
+					// std::cerr << "Failed to create VkDebugUtilsMessengerEXT" << std::endl;
 				}
 			}
 		}

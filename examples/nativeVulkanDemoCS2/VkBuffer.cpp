@@ -11,7 +11,7 @@ namespace csyvk
 		auto ctx = CsyVk::VkSystem::instance()->currentContext();
 
 		if (dev == nullptr && ctx == VK_NULL_HANDLE) {
-			csyvk::tools::exitFatal("Vulkan library should be initialized first! \n", 0);
+			// "Vulkan library should be initialized first!;
 		}
 
 		device = dev == nullptr ? ctx->deviceHandle() : dev;

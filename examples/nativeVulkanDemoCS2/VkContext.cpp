@@ -448,7 +448,7 @@ namespace CsyVk {
             vmaFindMemoryTypeIndexForBufferInfo(g_Allocator, &bufferCreateInfo, &allocationCreateInfo, &poolCreateInfo.memoryTypeIndex);
             VkResult res = vmaCreatePool(g_Allocator, &poolCreateInfo, &memoryPoolInfo.pool);
             if (res != VK_SUCCESS) {
-                csyvk::tools::exitFatal("Could not create memory pool : \n" + csyvk::tools::errorString(res), res);
+                // Could not create memory pool
                 return res;
             }
             poolMap[type] = memoryPoolInfo;

@@ -131,10 +131,6 @@ namespace csyvk
 			VkPipelineStageFlags dstStageMask,
 			VkImageSubresourceRange subresourceRange);
 
-		// Display error message and exit on fatal error
-		void exitFatal(const std::string& message, int32_t exitCode);
-		void exitFatal(const std::string& message, VkResult resultCode);
-
 		VkShaderModule loadShaderModule(const std::string fileName, VkDevice device);
 		VkShaderModule loadShaderModule(const std::string& fileName, const std::map<std::string, std::string>& macros, const std::string& MD5Encode, VkDevice device);
 
