@@ -28,9 +28,6 @@ namespace CsyVk {
 	private:
 		uint32_t m_num = 0;
 	};
-}
-
-namespace CsyVk {
 
 	template<typename T>
 	VkHostArray<T>::~VkHostArray()

@@ -1,5 +1,6 @@
 #pragma once
 #include "VkVariable.h"
+#include "VkConstant.h"
 
 namespace CsyVk {
 
@@ -23,12 +24,8 @@ namespace CsyVk {
 	protected:
 		T mVal;
 	};
-}
 
-#include "VkConstant.h"
-
-namespace CsyVk {
-
+	// GPU FUNCTIONS
 	template<typename T>
 	VkConstant<T>::VkConstant()
 		: VkVariable()

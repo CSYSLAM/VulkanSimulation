@@ -16,9 +16,7 @@ namespace CsyVk {
 	class Array<T, DeviceType::CPU>
 	{
 	public:
-		Array()
-		{
-		};
+		Array() {};
 
 		Array(uint num)
 		{
@@ -28,9 +26,7 @@ namespace CsyVk {
 		~Array() {};
 
 		void resize(uint n);
-
 		void reset();
-
 		void clear();
 
 		inline const T*	begin() const { return mData.size() == 0 ? nullptr : &mData[0]; }
@@ -149,9 +145,7 @@ namespace CsyVk
 	class Array<T, DeviceType::GPU>
 	{
 	public:
-		Array()
-		{
-		};
+		Array() {};
 
 		Array(uint num)
 		{

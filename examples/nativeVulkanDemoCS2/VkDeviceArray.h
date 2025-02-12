@@ -31,9 +31,6 @@ namespace CsyVk
 		bool mBufferUpdated = false;
 		uint32_t m_num = 0;
 	};
-}
-
-namespace CsyVk {
 
 	template<typename T>
 	VkDeviceArray<T>::~VkDeviceArray()

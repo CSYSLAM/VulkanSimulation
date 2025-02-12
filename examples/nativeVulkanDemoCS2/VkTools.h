@@ -71,13 +71,8 @@ namespace csyvk
 {
 	namespace tools
 	{
-		/** @brief Disable message boxes on fatal errors */
+
 		extern bool errorModeSilent;
-
-		/** @brief Returns an error code as a string */
-		std::string errorString(VkResult errorCode);
-
-		/** @brief Returns the device type as a string */
 		std::string physicalDeviceTypeString(VkPhysicalDeviceType type);
 
 		// Selected a suitable supported depth format starting with 32 bit down to 16 bit

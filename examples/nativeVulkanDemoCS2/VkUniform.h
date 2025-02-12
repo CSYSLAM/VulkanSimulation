@@ -1,6 +1,7 @@
 #pragma once
 #include "VkVariable.h"
 #include "VkBuffer.h"
+#include "VkUniform.h"
 
 namespace CsyVk {
 
@@ -21,7 +22,7 @@ namespace CsyVk {
 	};
 }
 
-#include "VkUniform.h"
+
 
 namespace CsyVk {
 
