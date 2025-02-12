@@ -35,24 +35,13 @@ namespace CsyVk
 		VkSystem();
 		~VkSystem();
 
-		/*!
-		 *	\brief	Creates the application wide Vulkan instance.
-		 */
 		VkResult createVulkanInstance();
-
-		/*!
-		 *	\brief	Current Vulkan context.
-		 */
 		VkContext* ctx = nullptr;
 
 		bool validation;
 		bool useMemoryPool = true;
 		std::string name = "Vulkan";
 		uint32_t apiVersion = VK_API_VERSION_1_2;
-
-		/*!
-		 *	\brief	Vulkan instance, stores all per-application states.
-		 */
 		VkInstance vkInstance;
 		VkPhysicalDevice physicalDevice;
 		VkPhysicalDeviceProperties deviceProperties;

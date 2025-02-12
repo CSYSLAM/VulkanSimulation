@@ -11,8 +11,6 @@ namespace CsyVk {
 
 	VkVariable::~VkVariable()
 	{
-		// TODO: sovle other issue while destroy buffer here.
-		// buffer.destroy();
 	}
 
 	VkDescriptorType VkVariable::descriptorType(const VariableType varType)

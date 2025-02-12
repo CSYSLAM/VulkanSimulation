@@ -9,7 +9,7 @@
 #pragma once
 
 #include "vulkan/vulkan.h"
-#include "VkInitializers.hpp"
+#include "VkInitializers.h"
 
 #include <math.h>
 #include <stdlib.h>

@@ -33,7 +33,6 @@ namespace CsyVk
 		cmdBufInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 
 		VK_CHECK_RESULT(vkBeginCommandBuffer(mCommandBuffers, &cmdBufInfo));
-		//vkCmdBindPipeline(mCommandBuffers, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
 	}
 
 	void VkProgram::dispatch(dim3 groupSize)
@@ -66,19 +65,12 @@ namespace CsyVk
 
 		static bool firstDraw = true;
 		VkSubmitInfo computeSubmitInfo = csyvk::initializers::submitInfo();
-		// FIXME find a better way to do this (without using fences, which is much slower)
 		VkPipelineStageFlags computeWaitDstStageMask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
 		if (!firstDraw) {
-			// TODO: semaphore should use in different submit queue.
-			//computeSubmitInfo.waitSemaphoreCount = 1;
-			//computeSubmitInfo.pWaitSemaphores = &compute.semaphores.ready;
-			//computeSubmitInfo.pWaitDstStageMask = &computeWaitDstStageMask;
 		}
 		else {
 			firstDraw = false;
 		}
-		//computeSubmitInfo.signalSemaphoreCount = 1;
-		//computeSubmitInfo.pSignalSemaphores = &compute.semaphores.complete;
 		computeSubmitInfo.commandBufferCount = 1;
 		computeSubmitInfo.pCommandBuffers = &mCommandBuffers;
 
@@ -111,10 +103,6 @@ namespace CsyVk
 				bufferBarrier.buffer = mBufferArgs[i]->bufferHandle();
 				bufferBarriers.push_back(bufferBarrier);
 			}
-			// 			bufferBarrier.buffer = input->bufferHandle();
-			// 			bufferBarriers.push_back(bufferBarrier);
-			// 			bufferBarrier.buffer = output->bufferHandle();
-			// 			bufferBarriers.push_back(bufferBarrier);
 			vkCmdPipelineBarrier(commandBuffer,
 				VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -165,11 +153,6 @@ namespace CsyVk
 				bufferBarrier.buffer = mBufferArgs[i]->bufferHandle();
 				bufferBarriers.push_back(bufferBarrier);
 			}
-			// 			std::vector<VkBufferMemoryBarrier> bufferBarriers;
-			// 			bufferBarrier.buffer = input->bufferHandle();
-			// 			bufferBarriers.push_back(bufferBarrier);
-			// 			bufferBarrier.buffer = output->bufferHandle();
-			// 			bufferBarriers.push_back(bufferBarrier);
 			vkCmdPipelineBarrier(
 				commandBuffer,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -333,21 +316,9 @@ namespace CsyVk
 	void VkMultiProgram::update(bool sync)
 	{
 		vkResetFences(ctx->deviceHandle(), 1, &mFence);
-
-		//		static bool firstDraw = true;
 		VkSubmitInfo computeSubmitInfo = csyvk::initializers::submitInfo();
-		// FIXME find a better way to do this (without using fences, which is much slower)
 		VkPipelineStageFlags computeWaitDstStageMask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-		// 		if (!firstDraw) {
-		// 			computeSubmitInfo.waitSemaphoreCount = 1;
-		// 			computeSubmitInfo.pWaitSemaphores = &compute.semaphores.ready;
-		// 			computeSubmitInfo.pWaitDstStageMask = &computeWaitDstStageMask;
-		// 		}
-		// 		else {
-		// 			firstDraw = false;
-		// 		}
-		// 		computeSubmitInfo.signalSemaphoreCount = 1;
-		// 		computeSubmitInfo.pSignalSemaphores = &compute.semaphores.complete;
+
 		computeSubmitInfo.commandBufferCount = 1;
 		computeSubmitInfo.pCommandBuffers = &commandBuffers;
 
@@ -365,8 +336,6 @@ namespace CsyVk
 		for (auto &pgm : mPrograms) {
 			pgm.second->restoreInherentCmdBuffer();
 		}
-
-		// release the storage buffers back to the graphics queue
 		vkEndCommandBuffer(commandBuffers);
 	}
 

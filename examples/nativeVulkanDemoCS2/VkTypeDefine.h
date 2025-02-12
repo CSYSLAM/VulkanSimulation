@@ -1,28 +1,4 @@
 #pragma once
-#define PERIDYNO_VERSION 0.0.1
-#define PERIDYNO_VERSION_MAJOR 0
-#define PERIDYNO_VERSION_MINOR 0
-#define PERIDYNO_VERSION_PATCH 1
-
-#define PERIDYNO_EXPORT
-#define PERIDYNO_IMPORT
-
-#define PERIDYNO_API PERIDYNO_IMPORT
-
-#define VK_BACKEND
-#define DYN_FUNC
-#define GPU_FUNC 
-#define CPU_FUNC 
-
-enum DeviceType
-{
-	CPU,
-	GPU,
-	UNDEFINED
-};
-
-#define PRECISION_FLOAT
-
 #include <list>
 #include <vector>
 #include <map>
@@ -36,13 +12,17 @@ enum DeviceType
 #include <stdexcept>
 #include <limits>
 
+enum DeviceType
+{
+	CPU,
+	GPU,
+	UNDEFINED
+};
 
 typedef float Real;
 
 namespace CsyVk {
-
 	using uint = unsigned int;
-
 	using uchar = unsigned char;
 	using uint64 = unsigned long long;
 	using int64 = signed long long;
@@ -59,94 +39,94 @@ namespace CsyVk {
 	class Bool
 	{
 	public:
-		DYN_FUNC Bool(bool v = false) { val = v ? 1 : 0; }
+		Bool(bool v = false) { val = v ? 1 : 0; }
 
-		DYN_FUNC inline bool operator! () const {
+		inline bool operator! () const {
 			return 1 - val ? true : false;
 		}
 
-		DYN_FUNC inline bool operator== (bool v) const {
+		inline bool operator== (bool v) const {
 			uint tmpV = v ? 1 : 0;
 			return val == tmpV;
 		}
 
-		DYN_FUNC inline bool operator== (const Bool& v) const {
+		inline bool operator== (const Bool& v) const {
 			return val == v.val;
 		}
 
-		DYN_FUNC inline Bool& operator= (const bool v) {
+		inline Bool& operator= (const bool v) {
 			val = v ? 1 : 0;
 			return *this;
 		}
 
-		DYN_FUNC inline Bool& operator= (const Bool& v) {
+		inline Bool& operator= (const Bool& v) {
 			val = v.val;
 			return *this;
 		}
 
-		DYN_FUNC inline Bool& operator&= (const bool v) {
+		inline Bool& operator&= (const bool v) {
 			val &= (v ? 1 : 0);
 			return *this;
 		}
 
-		DYN_FUNC inline Bool& operator|= (const bool v) {
+		inline Bool& operator|= (const bool v) {
 			val |= (v ? 1 : 0);
 			return *this;
 		}
 
-		DYN_FUNC inline Bool operator& (const bool v) const {
+		inline Bool operator& (const bool v) const {
 			Bool ret;
 			ret.val = val & (v ? 1 : 0);
 			return ret;
 		}
 
-		DYN_FUNC inline Bool operator| (const bool v) const {
+		inline Bool operator| (const bool v) const {
 			Bool ret;
 			ret.val = val | (v ? 1 : 0);
 			return ret;
 		}
 
-		DYN_FUNC inline Bool& operator&= (const Bool& v) {
+		inline Bool& operator&= (const Bool& v) {
 			val &= v.val;
 			return *this;
 		}
 
-		DYN_FUNC inline Bool& operator|= (const Bool& v) {
+		inline Bool& operator|= (const Bool& v) {
 			val |= v.val;
 			return *this;
 		}
 
-		DYN_FUNC inline Bool operator& (const Bool& v) const {
+		inline Bool operator& (const Bool& v) const {
 			Bool ret;
 			ret.val = val & v.val;
 			return ret;
 		}
 
-		DYN_FUNC inline Bool operator| (const Bool& v) const {
+		inline Bool operator| (const Bool& v) const {
 			Bool ret;
 			ret.val = val | v.val;
 			return ret;
 		}
 
-		DYN_FUNC inline bool operator&& (const Bool& v) const {
+		inline bool operator&& (const Bool& v) const {
 			return val & v.val;
 		}
 
-		DYN_FUNC inline bool operator|| (const Bool& v) const {
+		inline bool operator|| (const Bool& v) const {
 			return val | v.val;
 		}
 
-		DYN_FUNC inline bool operator&& (const bool& v) const {
+		inline bool operator&& (const bool& v) const {
 			uint tmpV = v ? 1 : 0;
 			return val & tmpV;
 		}
 
-		DYN_FUNC inline bool operator|| (const bool& v) const {
+		inline bool operator|| (const bool& v) const {
 			uint tmpV = v ? 1 : 0;
 			return val | tmpV;
 		}
 
-		DYN_FUNC inline operator bool() const {
+		inline operator bool() const {
 			return val == 1;
 		}
 
@@ -154,7 +134,7 @@ namespace CsyVk {
 	private:
 		uint val = 0;
 	};
-}// end of namespace dyno
+}
 
 
 namespace TypeInfo

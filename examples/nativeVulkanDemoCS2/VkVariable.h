@@ -1,5 +1,5 @@
 #pragma once
-#include "VkWinPlatform.h"
+#include "VkTypeDefine.h"
 #include "vulkan/vulkan.h"
 
 #include "VkContext.h"

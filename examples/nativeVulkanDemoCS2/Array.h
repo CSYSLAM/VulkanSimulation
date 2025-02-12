@@ -1,5 +1,5 @@
 #pragma once
-#include "VkWinPlatform.h"
+#include "VkTypeDefine.h"
 #include <cassert>
 #include <vector>
 #include <iostream>
