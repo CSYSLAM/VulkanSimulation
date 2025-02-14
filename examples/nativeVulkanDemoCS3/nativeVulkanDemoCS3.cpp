@@ -4,13 +4,14 @@
 #include "VkProgram.h"
 #include <optional>
 #include <array>
+#include <cstring> // Include for memcpy
 
 #include "u_vk_csy.h"
 
 using namespace CsyVk;
 
 std::string shaderDir = "C:/temp/CG/Code/VulkanSimulation/shaders/glsl/nativeVulkanDemoCS/VecAdd.comp.spv";
-std::array<float, 1024> inputData;
+std::array<float, 100> inputData;
 constexpr VkDeviceSize inputDataSize() { return sizeof(inputData); }
 
 VkData vkData;
@@ -20,20 +21,19 @@ std::optional<uint32_t> queueFamilyIndex;
 VkDevice device;
 VkQueue queue;
 VkBuffer storageBuffer;
-VkDeviceMemory storageBufferMemory;
 
-uint32_t findMemoryType(const VkMemoryRequirements& requirements, VkMemoryPropertyFlags properties)
-{
-	VkPhysicalDeviceMemoryProperties memProperties = CsySmallVk::Query::physicalDeviceMemoryProperties(physicalDevice);
-	for (uint32_t i = 0; i < memProperties.memoryTypeCount; ++i)
-	{
-		if (requirements.memoryTypeBits & (1 << i) &&
-			(memProperties.memoryTypes[i].propertyFlags & properties) == properties)
-		{
-			std::cout << "pick memory type [" << i << "]\n";
+// Helper function to find suitable memory type
+uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+	VkPhysicalDeviceMemoryProperties memProperties;
+	vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+
+	for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+		if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
 			return i;
 		}
 	}
+
+	throw std::runtime_error("failed to find suitable memory type!");
 }
 
 int main(int argc, char* argv[])
@@ -108,30 +108,7 @@ int main(int argc, char* argv[])
 	}
 	vkGetDeviceQueue(device, queueFamilyIndex.value(), 0, &queue);
 
-	//VkBufferCreateInfo createInfo1;
-	//createInfo1.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	//createInfo1.size = inputDataSize();
-	//createInfo1.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-	//createInfo1.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	//createInfo1.queueFamilyIndexCount = 0;
-	//createInfo1.pQueueFamilyIndices = nullptr;
-	//if (vkCreateBuffer(device, &createInfo1, nullptr, &storageBuffer) != VK_SUCCESS)
-	//	throw std::runtime_error("failed to create storage buffer!");
-	//VkMemoryRequirements requirements = CsySmallVk::Query::memoryRequirements(device, storageBuffer);
 
-	//VkMemoryAllocateInfo allocInfo = CsySmallVk::memoryAllocateInfo();
-	//allocInfo.allocationSize = requirements.size;
-	//allocInfo.memoryTypeIndex = findMemoryType(requirements,
-	//	VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-	//if (vkAllocateMemory(device, &allocInfo, nullptr, &storageBufferMemory) != VK_SUCCESS)
-	//	throw std::runtime_error("failed to allocate storage buffer memory");
-	//vkBindBufferMemory(device, storageBuffer, storageBufferMemory, 0);
-
-	//void* data;
-	//if (vkMapMemory(device, storageBufferMemory, 0, inputDataSize(), 0, &data) != VK_SUCCESS)
-	//	throw std::runtime_error("failed to map memory");
-	//memcpy(data, inputData.data(), inputDataSize());
-	//vkUnmapMemory(device, storageBufferMemory);
 
 	vkData.instance_ = instance;
 	vkData.physicalDevice_ = physicalDevice;
@@ -139,12 +116,45 @@ int main(int argc, char* argv[])
 	vkData.queue_ = queue;
 	vkData.queueFamilyIndex_ = queueFamilyIndex.value();
 
+	// Create buffer and allocate memory
+	VkBufferCreateInfo bufferCreateInfo = {};
+	bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferCreateInfo.size = inputDataSize();
+	bufferCreateInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	if (vkCreateBuffer(device, &bufferCreateInfo, nullptr, &storageBuffer) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create buffer!");
+	}
+
+	VkMemoryRequirements memRequirements;
+	vkGetBufferMemoryRequirements(device, storageBuffer, &memRequirements);
+
+	VkMemoryAllocateInfo allocInfo = {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = memRequirements.size;
+	allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+	VkDeviceMemory bufferMemory;
+	if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+		throw std::runtime_error("failed to allocate buffer memory!");
+	}
+
+	vkBindBufferMemory(device, storageBuffer, bufferMemory, 0);
+
+	// Copy inputData to buffer
+	void* data;
+	vkMapMemory(device, bufferMemory, 0, bufferCreateInfo.size, 0, &data);
+	memcpy(data, inputData.data(), (size_t) bufferCreateInfo.size);
+	vkUnmapMemory(device, bufferMemory);
+
 	VkSystem::instance()->initializeWithInstance(vkData);
 
 	//Initialize all buffers
 	uint num = 100;
 
-	DArray<float> dA(num);
+	// 使用新的构造函数从 VkBuffer 初始化 DArray
+	DArray<float> dA(storageBuffer);
 	DArray<float> dB(num);
 	DArray<float> dC(num);
 

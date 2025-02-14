@@ -152,6 +152,11 @@ namespace CsyVk
 			this->resize(num);
 		}
 
+		Array(VkBuffer buffer)
+		{
+			mData = VkDeviceArray<T>(buffer);
+		}
+
 		~Array() {};
 
 		void resize(const uint n);
@@ -189,43 +194,6 @@ namespace CsyVk
 		void assign(const Array<T, DeviceType::GPU>& src, const uint count, const uint dstOffset = 0, const uint srcOffset = 0);
 		void assign(const Array<T, DeviceType::CPU>& src, const uint count, const uint dstOffset = 0, const uint srcOffset = 0);
 		void assign(const std::vector<T>& src, const uint count, const uint dstOffset = 0, const uint srcOffset = 0);
-
-		void assignFromVkBuffer(VkBuffer vkBuffer, VkDeviceSize size, VkDevice device, VkQueue queue, VkCommandPool commandPool) {
-			// 创建一个命令缓冲区来执行复制操作
-			VkCommandBufferAllocateInfo allocInfo{};
-			allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-			allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-			allocInfo.commandPool = commandPool;
-			allocInfo.commandBufferCount = 1;
-
-			VkCommandBuffer commandBuffer;
-			vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
-
-			VkCommandBufferBeginInfo beginInfo{};
-			beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-			beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-			vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
-			// 设置缓冲区复制区域
-			VkBufferCopy copyRegion{};
-			copyRegion.size = size;
-			vkCmdCopyBuffer(commandBuffer, vkBuffer, mData.buffer(), 1, &copyRegion);
-
-			vkEndCommandBuffer(commandBuffer);
-
-			// 提交命令缓冲区
-			VkSubmitInfo submitInfo{};
-			submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-			submitInfo.commandBufferCount = 1;
-			submitInfo.pCommandBuffers = &commandBuffer;
-
-			vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-			vkQueueWaitIdle(queue);
-
-			// 释放命令缓冲区
-			vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-		}
 
 		friend std::ostream& operator<<(std::ostream& out, const Array<T, DeviceType::GPU>& dArray)
 		{
