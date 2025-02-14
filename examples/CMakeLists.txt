@@ -97,6 +97,7 @@ set(EXAMPLES
 	sph_useHead
 	nativeVulkanDemoCS
 	nativeVulkanDemoCS2
+	nativeVulkanDemoCS3
 )
 
 buildExamples()
