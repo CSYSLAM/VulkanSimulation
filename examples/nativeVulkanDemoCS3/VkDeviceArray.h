@@ -12,12 +12,6 @@ namespace CsyVk
 
 		VkDeviceArray(uint32_t num);
 
-		VkDeviceArray(VkBuffer buffer)
-		{
-			this->buffer = std::make_shared<csyvk::Buffer>();
-			this->buffer->buffer = buffer;
-		}
-
 		~VkDeviceArray();
 
 		VkResizeType resize(uint32_t num, VkBufferUsageFlags usageFlags = 0);

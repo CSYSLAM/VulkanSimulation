@@ -303,4 +303,29 @@ namespace CsyVk
 
 		return true;
 	}
+
+	template<typename T>
+	bool vkTransfer(VkDeviceArray<T>& dst, VkBuffer src)
+	{
+		VkContext* ctx = dst.currentContext();
+
+		assert(ctx != nullptr);
+		assert(dst.bufferHandle() != VK_NULL_HANDLE);
+
+		// Create a temporary buffer to hold the data during transfer
+		VkHostArray<T> tmpHostArray;
+		tmpHostArray.resize(dst.size());
+
+		// Copy data from existing VkBuffer to the temporary host array
+		VkCommandBuffer copyCmd = ctx->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+		VkBufferCopy copyRegion = {};
+		copyRegion.size = dst.size() * sizeof(T);
+		vkCmdCopyBuffer(copyCmd, src, tmpHostArray.bufferHandle(), 1, &copyRegion);
+
+		ctx->flushCommandBuffer(copyCmd, ctx->graphicsQueueHandle(), true);
+
+		// Transfer data from the temporary host array to the DArray's device buffer
+		vkTransfer(dst, tmpHostArray);
+		return true;
+	}
 }

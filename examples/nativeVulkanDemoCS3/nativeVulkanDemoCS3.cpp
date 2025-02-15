@@ -2,9 +2,10 @@
 #include "VkSystem.h"
 #include "Array.h"
 #include "VkProgram.h"
+#include "VkBuffer.h"
 #include <optional>
 #include <array>
-#include <cstring> // Include for memcpy
+#include <cstring>
 
 #include "u_vk_csy.h"
 
@@ -12,6 +13,7 @@ using namespace CsyVk;
 
 std::string shaderDir = "C:/temp/CG/Code/VulkanSimulation/shaders/glsl/nativeVulkanDemoCS/VecAdd.comp.spv";
 std::array<float, 100> inputData;
+std::array<float, 100> outputData;
 constexpr VkDeviceSize inputDataSize() { return sizeof(inputData); }
 
 VkData vkData;
@@ -40,7 +42,8 @@ int main(int argc, char* argv[])
 {
 	for (int i = 0; i < 100; i++)
 	{
-		inputData[i] = float(i);
+		inputData[i] = 15.0f;
+		outputData[i] = 0.0f;
 	}
 
 	VkApplicationInfo appInfo = CsySmallVk::applicationInfo();
@@ -148,13 +151,27 @@ int main(int argc, char* argv[])
 	memcpy(data, inputData.data(), (size_t) bufferCreateInfo.size);
 	vkUnmapMemory(device, bufferMemory);
 
+	void* data1;
+	vkMapMemory(device, bufferMemory, 0, inputDataSize(), 0, &data1);
+	memcpy(outputData.data(), data1, inputDataSize());
+	vkUnmapMemory(device, bufferMemory);
+	for (size_t i = 0; i < outputData.size(); ++i)
+	{
+		std::cout << outputData[i] << std::endl;
+	}
+
+	std::cout << "-----------------------------------------------" << std::endl;
+
+	uint bufferSize = inputDataSize();
 	VkSystem::instance()->initializeWithInstance(vkData);
+	uint num = 100;
+	DArray<float> dA(num);  // 假设 T 是 float
+	dA.resize(num);
+	vkTransfer(dA.mData, storageBuffer);
 
 	//Initialize all buffers
-	uint num = 100;
-
-	// 使用新的构造函数从 VkBuffer 初始化 DArray
-	DArray<float> dA(storageBuffer);
+	
+	//DArray<float> dA(num);
 	DArray<float> dB(num);
 	DArray<float> dC(num);
 
@@ -165,11 +182,8 @@ int main(int argc, char* argv[])
 	for (int i = 0; i < num; i++)
 	{
 		hA[i] = float(i);
-		hB[i] = float(i);
+		hB[i] = 1.0f;
 	}
-
-
-	dA.assign(hA);
 	dB.assign(hB);
 
 	//Declare a kernel

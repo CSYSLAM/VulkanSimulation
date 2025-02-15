@@ -152,11 +152,6 @@ namespace CsyVk
 			this->resize(num);
 		}
 
-		Array(VkBuffer buffer)
-		{
-			mData = VkDeviceArray<T>(buffer);
-		}
-
 		~Array() {};
 
 		void resize(const uint n);
@@ -205,7 +200,7 @@ namespace CsyVk
 			return out;
 		}
 
-	private:
+	//private:
 		VkDeviceArray<T> mData;
 	};
 
