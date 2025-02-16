@@ -208,30 +208,40 @@ int main(int argc, char* argv[])
 	}
 	dB.assign(hB);
 
+	struct UBOParameters {
+		float k;
+		float value;
+	};
+
 	//Declare a kernel
 	auto kernel = std::make_shared<VkProgram>(
-		BUFFER(float),		//Array A
-		BUFFER(float),		//Array B
-		BUFFER(float),		//Array C
-		CONSTANT(uint));
+			BUFFER(float),
+			BUFFER(float),
+			BUFFER(float),
+			UNIFORM(UBOParameters),
+			CONSTANT(uint));
+	VkConstant<uint> N(num);
 	kernel->load(shaderDir);
 
-	//Execuate the kernel
-	VkConstant<uint> N(num);
-	kernel->flush(
-		vkDispatchSize(num, 128),
-		dA.handle(),
-		dB.handle(),
-		dC.handle(),
-		&N);
+	VkUniform<UBOParameters> uniformParam;
+	UBOParameters up;
+	
+	for (int i = 0; i < 1000; i++) {
+		kernel->begin();
+		up.k = i;
+		up.value = 2 * i;
+		uniformParam.setValue(up);
+		kernel->enqueue(vkDispatchSize(num, 128), dA.handle(), dB.handle(), dC.handle(), &uniformParam, &N);
+		kernel->end();
 
-	//Copy results back to the host and print out
-	hC.assign(dC);
-	for (int i = 0; i < num; i++)
-	{
-		printf("%f \n", hC[i]);
+		kernel->update(true);
+		kernel->wait();
+		hC.assign(dC);
+		for (int i = 0; i < num; i++)
+		{
+			printf("%f \n", hC[i]);
+		}
+		system("pause");
 	}
-
-	system("pause");
 	return 0;
 }
