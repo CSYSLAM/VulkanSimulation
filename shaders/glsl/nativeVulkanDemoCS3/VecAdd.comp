@@ -25,6 +25,12 @@ void main()
 	uint index = id.x;
 	if (index >= pushConsts.count) 
 		return;
+	if (index % 3 == 0) {
+		C[index] = A[index];
+	} else if (index % 3 == 1) {
+		C[index] = B[index];
+	} else {
+		C[index] = 321.0f;
+	}
 
-    C[index] = A[index] + B[index];
 }

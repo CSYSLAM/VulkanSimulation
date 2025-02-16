@@ -27,8 +27,8 @@ namespace CsyVk
 
 		void reset();
 
-	protected:
 		bool mBufferUpdated = false;
+
 		uint32_t m_num = 0;
 	};
 

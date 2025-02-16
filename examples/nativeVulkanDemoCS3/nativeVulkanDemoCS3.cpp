@@ -11,7 +11,7 @@
 
 using namespace CsyVk;
 
-std::string shaderDir = "C:/temp/CG/Code/VulkanSimulation/shaders/glsl/nativeVulkanDemoCS/VecAdd.comp.spv";
+std::string shaderDir = "C:\\temp\\CG\\Engine\\VulkanSimulation\\shaders\\glsl\\nativeVulkanDemoCS3\\VecAdd.comp.spv";
 std::array<float, 100> inputData;
 std::array<float, 100> outputData;
 constexpr VkDeviceSize inputDataSize() { return sizeof(inputData); }
@@ -22,7 +22,6 @@ VkPhysicalDevice physicalDevice;
 std::optional<uint32_t> queueFamilyIndex;
 VkDevice device;
 VkQueue queue;
-VkBuffer storageBuffer;
 
 // Helper function to find suitable memory type
 uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
@@ -42,7 +41,7 @@ int main(int argc, char* argv[])
 {
 	for (int i = 0; i < 100; i++)
 	{
-		inputData[i] = 15.0f;
+		inputData[i] = 33.0f;
 		outputData[i] = 0.0f;
 	}
 
@@ -111,78 +110,101 @@ int main(int argc, char* argv[])
 	}
 	vkGetDeviceQueue(device, queueFamilyIndex.value(), 0, &queue);
 
-
-
 	vkData.instance_ = instance;
 	vkData.physicalDevice_ = physicalDevice;
 	vkData.device_ = device;
 	vkData.queue_ = queue;
 	vkData.queueFamilyIndex_ = queueFamilyIndex.value();
+	VkSystem::instance()->initializeWithInstance(vkData);
+	DArray<float> dA(100);
 
-	// Create buffer and allocate memory
-	VkBufferCreateInfo bufferCreateInfo = {};
-	bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	bufferCreateInfo.size = inputDataSize();
-	bufferCreateInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-	bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	VkCommandPool commandPool;
+	VkCommandPoolCreateInfo createInfo11 = CsySmallVk::commandPoolCreateInfo();
+	createInfo11.queueFamilyIndex = queueFamilyIndex.value();
+	if (vkCreateCommandPool(device, &createInfo11, nullptr, &commandPool)
+		!= VK_SUCCESS)
+		throw std::runtime_error("failed to create command pool!");
 
-	if (vkCreateBuffer(device, &bufferCreateInfo, nullptr, &storageBuffer) != VK_SUCCESS) {
-		throw std::runtime_error("failed to create buffer!");
+	// Create staging buffer and allocate memory
+	VkBuffer stagingBuffer;
+	VkDeviceMemory stagingBufferMemory;
+	VkBufferCreateInfo stagingBufferCreateInfo = {};
+	stagingBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	stagingBufferCreateInfo.size = inputDataSize();
+	stagingBufferCreateInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	stagingBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	if (vkCreateBuffer(device, &stagingBufferCreateInfo, nullptr, &stagingBuffer) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create staging buffer!");
 	}
 
-	VkMemoryRequirements memRequirements;
-	vkGetBufferMemoryRequirements(device, storageBuffer, &memRequirements);
+	VkMemoryRequirements stagingMemRequirements;
+	vkGetBufferMemoryRequirements(device, stagingBuffer, &stagingMemRequirements);
 
-	VkMemoryAllocateInfo allocInfo = {};
-	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	allocInfo.allocationSize = memRequirements.size;
-	allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	VkMemoryAllocateInfo stagingAllocInfo = {};
+	stagingAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	stagingAllocInfo.allocationSize = stagingMemRequirements.size;
+	stagingAllocInfo.memoryTypeIndex = findMemoryType(stagingMemRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-	VkDeviceMemory bufferMemory;
-	if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
-		throw std::runtime_error("failed to allocate buffer memory!");
+	if (vkAllocateMemory(device, &stagingAllocInfo, nullptr, &stagingBufferMemory) != VK_SUCCESS) {
+		throw std::runtime_error("failed to allocate staging buffer memory!");
 	}
 
-	vkBindBufferMemory(device, storageBuffer, bufferMemory, 0);
+	vkBindBufferMemory(device, stagingBuffer, stagingBufferMemory, 0);
 
-	// Copy inputData to buffer
-	void* data;
-	vkMapMemory(device, bufferMemory, 0, bufferCreateInfo.size, 0, &data);
-	memcpy(data, inputData.data(), (size_t) bufferCreateInfo.size);
-	vkUnmapMemory(device, bufferMemory);
+	// Copy inputData to staging buffer
+	void* stagingData;
+	vkMapMemory(device, stagingBufferMemory, 0, stagingBufferCreateInfo.size, 0, &stagingData);
+	memcpy(stagingData, inputData.data(), (size_t) stagingBufferCreateInfo.size);
+	vkUnmapMemory(device, stagingBufferMemory);
 
-	void* data1;
-	vkMapMemory(device, bufferMemory, 0, inputDataSize(), 0, &data1);
-	memcpy(outputData.data(), data1, inputDataSize());
-	vkUnmapMemory(device, bufferMemory);
-	for (size_t i = 0; i < outputData.size(); ++i)
-	{
-		std::cout << outputData[i] << std::endl;
-	}
+	// Copy data from staging buffer to storage buffer
+	VkCommandBufferAllocateInfo allocInfoCmd = {};
+	allocInfoCmd.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfoCmd.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfoCmd.commandPool = commandPool; // You need to create or have a commandPool
+	allocInfoCmd.commandBufferCount = 1;
+
+	VkCommandBuffer commandBuffer;
+	vkAllocateCommandBuffers(device, &allocInfoCmd, &commandBuffer);
+
+	VkCommandBufferBeginInfo beginInfo = {};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+	vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+	VkBufferCopy copyRegion = {};
+	copyRegion.size = inputDataSize();
+	vkCmdCopyBuffer(commandBuffer, stagingBuffer, dA.mData.buffer->buffer, 1, &copyRegion);
+
+	vkEndCommandBuffer(commandBuffer);
+
+	VkSubmitInfo submitInfo = {};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &commandBuffer;
+
+	vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+	vkQueueWaitIdle(queue);
+
+	vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+	vkFreeMemory(device, stagingBufferMemory, nullptr);
+	vkDestroyBuffer(device, stagingBuffer, nullptr);
 
 	std::cout << "-----------------------------------------------" << std::endl;
 
-	uint bufferSize = inputDataSize();
-	VkSystem::instance()->initializeWithInstance(vkData);
 	uint num = 100;
-	DArray<float> dA(num);  // 假设 T 是 float
-	dA.resize(num);
-	vkTransfer(dA.mData, storageBuffer);
-
-	//Initialize all buffers
-	
-	//DArray<float> dA(num);
+	 
 	DArray<float> dB(num);
 	DArray<float> dC(num);
 
-	CArray<float> hA(num);
 	CArray<float> hB(num);
 	CArray<float> hC(num);
 
 	for (int i = 0; i < num; i++)
 	{
-		hA[i] = float(i);
-		hB[i] = 1.0f;
+		hB[i] = float(i);
 	}
 	dB.assign(hB);
 
@@ -209,6 +231,7 @@ int main(int argc, char* argv[])
 	{
 		printf("%f \n", hC[i]);
 	}
+
 	system("pause");
 	return 0;
 }

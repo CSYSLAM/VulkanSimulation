@@ -25,7 +25,6 @@ namespace CsyVk {
 		void* mapped();
 		void unmap();
 
-	private:
 		uint32_t m_num = 0;
 	};
 

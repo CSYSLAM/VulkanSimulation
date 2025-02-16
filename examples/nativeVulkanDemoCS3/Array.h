@@ -199,8 +199,7 @@ namespace CsyVk
 
 			return out;
 		}
-
-	//private:
+	
 		VkDeviceArray<T> mData;
 	};
 

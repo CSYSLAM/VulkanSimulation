@@ -44,9 +44,9 @@ namespace CsyVk {
 
 		virtual void* data() const { return nullptr; }
 
+		std::shared_ptr<csyvk::Buffer> buffer;
+
 	protected:
 		VkContext* ctx = nullptr;
-
-		std::shared_ptr<csyvk::Buffer> buffer;
 	};
 }
