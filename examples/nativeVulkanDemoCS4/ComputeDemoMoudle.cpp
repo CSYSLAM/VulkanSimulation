@@ -38,9 +38,8 @@ namespace CsyVk
 
 		Log::sendMessage(Log::Info, "Compute Demo Moudle compute \n");
 
-        if (frameNum == 0) {
+        if (this->inFrameNumber()->getData() == 0) {
             this->Init();
-            
         }
 	
 		this->Step();
@@ -50,17 +49,11 @@ namespace CsyVk
 
 	void ComputeDemoMoudle::Init()
 	{
-		// //init volume
-		// if (frameNum == 0);
-		// {
-        //     frameNum++;
-		// }
+		kValue = 0.0;
 	}
 
 	void ComputeDemoMoudle::Step()
 	{
-        float dt_ = this->inTimeStep()->getData();
-        frameNum++;
         kValue += 1.5;
 		//adopt forward-Euler time integration
 		auto vNum = this->inInputArrayA()->getData().size();

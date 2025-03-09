@@ -13,7 +13,7 @@ namespace CsyVk
         this->stateInputArrayB()->allocate();
 
 		auto computeDemoMoudle = std::make_shared<ComputeDemoMoudle>();
-        this->stateTimeStep()->connect(computeDemoMoudle->inTimeStep());
+        this->stateFrameNumber()->connect(computeDemoMoudle->inFrameNumber());
 		this->stateInputArrayA()->connect(computeDemoMoudle->inInputArrayA());
 		this->stateInputArrayB()->connect(computeDemoMoudle->inInputArrayB());
 		this->animationPipeline()->pushModule(computeDemoMoudle);
