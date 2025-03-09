@@ -1,0 +1,31 @@
+#include "VkVariable.h"
+#include "VkSystem.h"
+
+namespace CsyVk {
+
+	VkVariable::VkVariable()
+	{
+	    buffer = std::make_shared<csyvk::Buffer>();
+		ctx = VkSystem::instance()->currentContext();
+	}
+
+	VkVariable::~VkVariable()
+	{
+	}
+
+	VkDescriptorType VkVariable::descriptorType(const VariableType varType)
+	{
+		switch (varType)
+		{
+		case DeviceBuffer:
+			return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		case Uniform:
+			return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		default:
+			break;
+		}
+
+		return VK_DESCRIPTOR_TYPE_MAX_ENUM;
+	}
+
+}

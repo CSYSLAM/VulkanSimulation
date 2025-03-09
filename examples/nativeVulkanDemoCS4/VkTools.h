@@ -1,0 +1,125 @@
+/*
+* Assorted Vulkan helper functions
+*
+* Copyright (C) 2016 by Sascha Willems - www.saschawillems.de
+*
+* This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
+*/
+
+#pragma once
+
+#include "vulkan/vulkan.h"
+#include "VkInitializers.h"
+
+#include <math.h>
+#include <stdlib.h>
+#include <string>
+#include <cstring>
+#include <fstream>
+#include <assert.h>
+#include <stdio.h>
+#include <vector>
+#include <map>
+#include <iostream>
+#include <stdexcept>
+#include <fstream>
+#include <windows.h>
+#include <fcntl.h>
+#include <io.h>
+
+// Custom define for better code readability
+#define VK_FLAGS_NONE 0
+// Default fence timeout in nanoseconds
+#define DEFAULT_FENCE_TIMEOUT 100000000000
+
+// Macro to check and display Vulkan return results
+#define VK_CHECK_RESULT(f)																				\
+{																										\
+	VkResult res = (f);																					\
+	if (res != VK_SUCCESS)																				\
+	{																									\
+		assert(res == VK_SUCCESS);																		\
+	}																									\
+}
+
+
+template<typename T>
+std::string getDynamicSpvFile(const std::string &fileName)
+{
+    std::string typeName;
+    if (typeid(T).name() == typeid(int).name())
+        typeName = "int";
+    else if (typeid(T).name() == typeid(uint32_t).name())
+        typeName = "uint";
+    else if (typeid(T).name() == typeid(float).name())
+        typeName = "float";
+
+    const static std::string suffix = ".comp.spv";
+    std::string outFileName = fileName;
+    unsigned int suffixPos = outFileName.rfind(suffix);
+    if (suffixPos != (outFileName.length() - suffix.length()))
+    {
+        return fileName;
+    }
+
+    // test.comp.spv --> test.int.comp.spv
+    outFileName.insert(suffixPos, "." + typeName);
+    return getAssetPath() + outFileName;
+}
+
+namespace csyvk
+{
+	namespace tools
+	{
+
+		extern bool errorModeSilent;
+		std::string physicalDeviceTypeString(VkPhysicalDeviceType type);
+
+		// Selected a suitable supported depth format starting with 32 bit down to 16 bit
+		// Returns false if none of the depth formats in the list is supported by the device
+		VkBool32 getSupportedDepthFormat(VkPhysicalDevice physicalDevice, VkFormat *depthFormat);
+
+		// Returns if a given format support LINEAR filtering
+		VkBool32 formatIsFilterable(VkPhysicalDevice physicalDevice, VkFormat format, VkImageTiling tiling);
+
+		// Put an image memory barrier for setting an image layout on the sub resource into the given command buffer
+		void setImageLayout(
+			VkCommandBuffer cmdbuffer,
+			VkImage image,
+			VkImageLayout oldImageLayout,
+			VkImageLayout newImageLayout,
+			VkImageSubresourceRange subresourceRange,
+			VkPipelineStageFlags srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VkPipelineStageFlags dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+		// Uses a fixed sub resource layout with first mip level and layer
+		void setImageLayout(
+			VkCommandBuffer cmdbuffer,
+			VkImage image,
+			VkImageAspectFlags aspectMask,
+			VkImageLayout oldImageLayout,
+			VkImageLayout newImageLayout,
+			VkPipelineStageFlags srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VkPipelineStageFlags dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+
+		/** @brief Insert an image memory barrier into the command buffer */
+		void insertImageMemoryBarrier(
+			VkCommandBuffer cmdbuffer,
+			VkImage image,
+			VkAccessFlags srcAccessMask,
+			VkAccessFlags dstAccessMask,
+			VkImageLayout oldImageLayout,
+			VkImageLayout newImageLayout,
+			VkPipelineStageFlags srcStageMask,
+			VkPipelineStageFlags dstStageMask,
+			VkImageSubresourceRange subresourceRange);
+
+		VkShaderModule loadShaderModule(const std::string fileName, VkDevice device);
+		VkShaderModule loadShader(const char *fileName, VkDevice device);
+
+
+		/** @brief Checks if a file exists */
+		bool fileExists(const std::string &filename);
+
+		uint32_t alignedSize(uint32_t value, uint32_t alignment);
+	}
+}

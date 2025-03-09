@@ -92,12 +92,14 @@ set(EXAMPLES
 	computeSph
 	computeEulerFluid
 	simpleParticles
+	simpleParticles_useVKbase
 	simpleParticles_useHead
         MPMFluid
 	sph_useHead
 	nativeVulkanDemoCS
 	nativeVulkanDemoCS2
 	nativeVulkanDemoCS3
+	nativeVulkanDemoCS4
 )
 
 buildExamples()
