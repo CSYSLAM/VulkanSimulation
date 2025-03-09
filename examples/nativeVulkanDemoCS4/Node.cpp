@@ -17,15 +17,6 @@ Node::~Node()
 {
 	mModuleList.clear();
 
-// 	for (auto port : mImportNodes)
-// 	{
-// 		auto& nodes = port->getNodes();
-// 		for (auto node : nodes)
-// 		{
-// 			node->disconnect(port);
-// 		}
-// 	}
-
 	for (auto port : mExportNodes)
 	{
 		this->disconnect(port);
@@ -110,29 +101,6 @@ SceneGraph* Node::getSceneGraph()
 	return mSceneGraph;
 }
 
-// Node* Node::addAncestor(Node* anc)
-// {
-// 	if (hasAncestor(anc) || anc == nullptr)
-// 		return nullptr;
-// 
-// 	anc->addDescendant(this);
-// 
-// 	mAncestors.push_back(anc);
-// 
-// 	if (mSceneGraph) {
-// 		mSceneGraph->markQueueUpdateRequired();
-// 	}
-// 
-// 	return anc;
-// }
-// 
-// bool Node::hasAncestor(Node* anc)
-// {
-// 	auto it = find(mAncestors.begin(), mAncestors.end(), anc);
-// 
-// 	return it == mAncestors.end() ? false : true;
-// }
-
 void Node::preUpdateStates()
 {
 
@@ -153,8 +121,9 @@ void Node::update()
 	{
 		this->preUpdateStates();
 
-		if (mPhysicsEnabled)
+		if (mPhysicsEnabled) {
 			this->updateStates();
+		}
 
 		this->postUpdateStates();
 
@@ -277,28 +246,6 @@ void Node::tick()
 	}
 }
 
-// std::shared_ptr<DeviceContext> Node::getContext()
-// {
-// 	if (m_context == nullptr)
-// 	{
-// 		m_context = TypeInfo::New<DeviceContext>();
-// 		m_context->setParent(this);
-// 		addModule(m_context);
-// 	}
-// 	return m_context;
-// }
-// 
-// void Node::setContext(std::shared_ptr<DeviceContext> context)
-// {
-// 	if (m_context != nullptr)
-// 	{
-// 		deleteModule(m_context);
-// 	}
-// 
-// 	m_context = context; 
-// 	addModule(m_context);
-// }
-
 std::shared_ptr<Pipeline> Node::resetPipeline()
 {
 	if (mResetPipeline == nullptr)
@@ -326,42 +273,6 @@ std::shared_ptr<GraphicsPipeline> Node::graphicsPipeline()
 	return mGraphicsPipeline;
 }
 
-/*
-std::shared_ptr<MechanicalState> Node::getMechanicalState()
-{
-	if (m_mechanical_state == nullptr)
-	{
-		m_mechanical_state = TypeInfo::New<MechanicalState>();
-		m_mechanical_state->setParent(this);
-	}
-	return m_mechanical_state;
-}*/
-/*
-bool Node::addModule(std::string name, Module* module)
-{
-	if (getContext() == nullptr || module == NULL)
-	{
-		std::cout << "Context or module does not exist!" << std::endl;
-		return false;
-	}
-
-	std::map<std::string, Module*>::iterator found = m_modules.find(name);
-	if (found != m_modules.end())
-	{
-		std::cout << "Module name already exists!" << std::endl;
-		return false;
-	}
-	else
-	{
-		m_modules[name] = module;
-		m_module_list.push_back(module);
-
-//		module->insertToNode(this);
-	}
-
-	return true;
-}
-*/
 bool Node::addModule(std::shared_ptr<Module> module)
 {
 	bool ret = true;
@@ -378,35 +289,6 @@ bool Node::deleteModule(std::shared_ptr<Module> module)
 		
 	return ret;
 }
-
-// void Node::doTraverseBottomUp(Action* act)
-// {
-// 	act->start(this);
-// 	auto iter = mAncestors.begin();
-// 	for (; iter != mAncestors.end(); iter++)
-// 	{
-// 		(*iter)->doTraverseBottomUp(act);
-// 	}
-// 
-// 	act->process(this);
-// 
-// 	act->end(this);
-// }
-// 
-// void Node::doTraverseTopDown(Action* act)
-// {
-// 	act->start(this);
-// 	act->process(this);
-// 
-// 	auto iter = mAncestors.begin();
-// 	for (; iter != mAncestors.end(); iter++)
-// 	{
-// 		(*iter)->doTraverseTopDown(act);
-// 	}
-// 
-// 	act->end(this);
-// }
-
 
 std::string FormatConnectionInfo(Node* node, NodePort* port, bool connecting, bool succeeded)
 {

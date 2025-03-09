@@ -12,14 +12,14 @@ layout(std430, binding = 2) buffer VecC {
 	float C[ ];
 };
 
-layout(std140, binding = 3) uniform UBOParameters
-{
-  float k;
-  float value;
-} ubo;
+// layout(std140, binding = 3) uniform UBOParameters
+// {
+//   float k;
+//   float value;
+// } ubo;
 
 layout (push_constant) uniform PushConsts {
-	uint count;
+	float count;
 } pushConsts;
 
 layout (local_size_x = 128) in;
@@ -29,16 +29,9 @@ void main()
 	uvec3 id = gl_GlobalInvocationID; 
 
 	uint index = id.x;
-	if (index >= pushConsts.count) 
+	if (index >= 100) 
 		return;
-	if (index % 3 == 0) {
-		C[index] = A[index];
-		A[index] = A[index] + ubo.k;
-	} else if (index % 3 == 1) {
-		C[index] = B[index];
-		B[index] = B[index] - 1.0f;
-	} else {
-		C[index] = ubo.value;
-	}
-
+	A[index] = A[index] + 1.0f;
+	B[index] = B[index] + pushConsts.count;
+	C[index] = A[index] + B[index];
 }

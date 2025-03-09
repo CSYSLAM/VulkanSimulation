@@ -6,6 +6,9 @@
 #include <optional>
 #include <array>
 #include <cstring>
+#include  "SceneGraph.h"
+#include  "ComputeDemoNode.h"
+#include "SceneGraphFactory.h"
 
 #include "u_vk_csy.h"
 
@@ -195,53 +198,29 @@ int main(int argc, char* argv[])
 	std::cout << "-----------------------------------------------" << std::endl;
 
 	uint num = 100;
-	 
-	DArray<float> dB(num);
-	DArray<float> dC(num);
-
+	
 	CArray<float> hB(num);
 	CArray<float> hC(num);
 
 	for (int i = 0; i < num; i++)
 	{
-		hB[i] = float(i);
+		hB[i] = 1.0;
+		hC[i] = 1.0;
 	}
-	dB.assign(hB);
 
-	struct UBOParameters {
-		float k;
-		float value;
-	};
+	auto scene = std::make_shared<CsyVk::SceneGraph>();
+	auto computeDemo = scene->addNode(std::make_shared<CsyVk::ComputeDemo>());
+	computeDemo->loadData(hB, hC);
+	CsyVk::SceneGraphFactory::instance()->pushScene(scene);
+	auto activeScene = CsyVk::SceneGraphFactory::instance()->active();
+	activeScene->reset();
 
-	//Declare a kernel
-	auto kernel = std::make_shared<VkProgram>(
-			BUFFER(float),
-			BUFFER(float),
-			BUFFER(float),
-			UNIFORM(UBOParameters),
-			CONSTANT(uint));
-	VkConstant<uint> N(num);
-	kernel->load(shaderDir);
-
-	VkUniform<UBOParameters> uniformParam;
-	UBOParameters up;
-	
-	for (int i = 0; i < 1000; i++) {
-		kernel->begin();
-		up.k = i;
-		up.value = 2 * i;
-		uniformParam.setValue(up);
-		kernel->enqueue(vkDispatchSize(num, 128), dA.handle(), dB.handle(), dC.handle(), &uniformParam, &N);
-		kernel->end();
-
-		kernel->update(true);
-		kernel->wait();
-		hC.assign(dC);
-		for (int i = 0; i < num; i++)
-		{
-			printf("%f \n", hC[i]);
-		}
-		system("pause");
+	while (true) {
+		activeScene->takeOneFrame();
+		// activeScene->updateGraphicsContext();
 	}
+
+	// system("pause");
+
 	return 0;
 }

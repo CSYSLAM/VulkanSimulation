@@ -191,17 +191,15 @@ namespace CsyVk
 	{
 		mSync.lock();
 
-		std::cout << "****************    Frame " << mFrameNumber << " Started    ****************" << std::endl;
-		
 		CTimer timer;
 		timer.start();
 
 		if (mAsynchronousSimulation)
 		{
+			// std::cout << "----------------  CSY  Frame start1 " << std::endl;
 			this->advanceInAsync();
-		}
-		else
-		{
+		} else {
+			// std::cout << "----------------  CSY  Frame start2 " << std::endl;
 			float t = 0.0f;
 			float dt = 0.0f;
 
@@ -224,12 +222,9 @@ namespace CsyVk
 			if (mAdvativeInterval)
 			{
 				this->advance(dt);
-			}
-			else
-			{
+			} else {
 				float interval = 1.0f / mFrameRate;
-				while (t + dt < interval)
-				{
+				while (t + dt < interval) {
 					this->advance(dt);
 
 					t += dt;
@@ -248,7 +243,7 @@ namespace CsyVk
 
 		timer.stop();
 
-		std::cout << "----------------    Frame " << mFrameNumber << " Ended! ( " << timer.getElapsedTime() << " ms in Total)  ----------------" << std::endl << std::endl;
+		// std::cout << "----------------    Frame " << mFrameNumber << " Ended! ( " << timer.getElapsedTime() << " ms in Total)  ----------------" << std::endl << std::endl;
 
 		mFrameNumber++;
 

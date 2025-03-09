@@ -12,6 +12,7 @@ namespace CsyVk
 
 	void ComputeModule::updateImpl()
 	{
+		std::cout << "ComputeModule is updated" << std::endl;
 		this->compute();
 	}
 }
