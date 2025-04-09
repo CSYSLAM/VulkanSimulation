@@ -22,7 +22,9 @@ include_directories(external/imgui)
 include_directories(external/tinygltf)
 include_directories(external/ktx/include)
 include_directories(external/ktx/other_include)
+include_directories(external/VulkanMemoryAllocator/include)
 include_directories(base)
+include_directories(csyvkbase)
 
 target_link_libraries(glfw)
 
@@ -191,4 +193,5 @@ ENDIF(WIN32)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/")
 
 add_subdirectory(base)
+add_subdirectory(csyvkbase)
 add_subdirectory(examples)
