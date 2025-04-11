@@ -99,6 +99,7 @@ set(EXAMPLES
 	simpleDemoNoCsyVk
 	simpleParticles_useCsyVk
 	nativeVulkanDemo
+	sph3d_useHead
 )
 
 buildExamples()
