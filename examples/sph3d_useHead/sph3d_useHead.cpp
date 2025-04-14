@@ -11,7 +11,6 @@
 #include "vulkanexamplebase.h"
 #include <chrono>
 
-
 #define PARTICLE_COUNT 64 * 1024
 
 #define SCALE 0.37
@@ -26,24 +25,14 @@ public:
 
 	// SSBO particle declaration
 	struct alignas(16) Particle {
-		glm::vec4 pos;								// Particle position
-		glm::vec4 vel;								// Particle velocity
-		glm::vec4 acc;								// Particle acceleration
-		float density;								// Particle density
-		float pressure;
+		glm::vec4 position;          // Particle position
+		glm::vec4 velocity;          // Particle velocity
+		glm::vec4 acceleration;      // Particle acceleration
+		float particleDensity;       // Particle density
+		float particlePressure;      // Particle pressure
 	};
 
-	// We use a shader storage buffer object to store the particlces
-	// This is updated by the compute pipeline and displayed as a vertex buffer by the graphics pipeline
 	vks::Buffer storageBuffer;
-	struct alignas(16) Test {
-		glm::vec4 testBuf1;
-		glm::vec4 testBuf2;
-		float testVal1;
-		float testVal2;
-	};
-
-	vks::Buffer testBuffer;
 	vks::Buffer indexBuffer, cellIndexBuffer, cellOffsetBuffer;		// indexBuffer: actually next_particle_in_cell
 	vks::Buffer neighborCountBuffer;
 
@@ -74,22 +63,22 @@ public:
 		VkPipelineLayout pipelineLayout;			// Layout of the compute pipeline
 		VkPipeline pipeline;						// Compute pipeline for updating particle positions
 		vks::Buffer uniformBuffer;					// Uniform buffer object containing particle system parameters
-		struct UniformData {						// Compute shader uniform block object
-			float deltaT;							//		Frame delta time
-			float destX;							//		x position of the attractor
-			float destY;							//		y position of the attractor
-			float smoothRadius;						//		Radius of the smoothing kernel
-			float mass;								//		Mass of each particle
-			float restDensity;						//		Rest density of the fluid
-			float viscosity;						//		Viscosity of the fluid
-			float particleStiffness;				//		Pressure stiffness of each particle
-			float scale = SCALE;					//		SimWorld to GraphicsWorld
-			float maxSpeed;							//		Maximum speed of each particle
-			glm::vec2 gravity;						//		Gravity vector
+		struct UniformData {
+			float deltaTime;
+			float attractorX;
+			float attractorY;
+			float smoothingRadius;
+			float particleMass;
+			float restFluidDensity;
+			float fluidViscosity;
+			float pressureStiffness;
+			float scale = SCALE;
+			float maxParticleSpeed;
+			glm::vec2 gravityVector;
 			int32_t particleCount = PARTICLE_COUNT;
-			int32_t gridCount;						//		Number of cells in the grid
-			int32_t groupSize;						//		gridCount / particleCount
-			int32_t activePNum;						//		Number of active particles
+			int32_t gridCellCount;
+			int32_t gridCountPerThread;
+			int32_t activeParticleCount;
 		} uniformData;
 	} compute;
 
@@ -125,7 +114,7 @@ public:
 			cellIndexBuffer.destroy();
 			cellOffsetBuffer.destroy();
 			neighborCountBuffer.destroy();
-			testBuffer.destroy();
+
 		}
 	}
 
@@ -307,7 +296,7 @@ public:
 
 		// Initial particle positions
 		std::vector<Particle> particleBuffer(PARTICLE_COUNT);
-		int num_p = 0;
+		int particlesCount = 0;
 		glm::vec4 volumeBegin = glm::vec4(-0.5f, -0.8f, -0.5f, 0.0f);
 		glm::vec4 volumeEnd = glm::vec4(0.5f, 0.8f, 0.5f, 0.0f);
 		float dx = 0.01f / SCALE;
@@ -319,12 +308,12 @@ public:
 				for (int k = 0; k < resZ; k++) {
 					int n = (i * resY + j) * resZ + k;
 					if (n < PARTICLE_COUNT) {
-						particleBuffer[n].pos = glm::vec4(i * dx, j * dx, k * dx, 1.0f) + volumeBegin;
-						particleBuffer[n].vel = glm::vec4(0.0f);
-						particleBuffer[n].acc = glm::vec4(0.0f);
-						particleBuffer[n].density = 0.f;
-						particleBuffer[n].pressure = 0.f;
-						num_p++;
+						particleBuffer[n].position = glm::vec4(i * dx, j * dx, k * dx, 1.0f) + volumeBegin;
+						particleBuffer[n].velocity = glm::vec4(0.0f);
+						particleBuffer[n].acceleration = glm::vec4(0.0f);
+						particleBuffer[n].particleDensity = 0.f;
+						particleBuffer[n].particlePressure = 0.f;
+						particlesCount++;
 					}
 					else
 						break;
@@ -332,14 +321,14 @@ public:
 			}
 		}
 
-		compute.uniformData.activePNum = num_p;
-		for (int i = num_p; i < PARTICLE_COUNT; i++)
+		compute.uniformData.activeParticleCount = particlesCount;
+		for (int i = particlesCount; i < PARTICLE_COUNT; i++)
 		{
-			particleBuffer[i].pos = glm::vec4(20.0f, 20.0f, 20.0f, 0.0f);
-			particleBuffer[i].vel = glm::vec4(0.0f);
-			particleBuffer[i].acc = glm::vec4(0.0f);
-			particleBuffer[i].density = 0.001f;
-			particleBuffer[i].pressure = 0.f;
+			particleBuffer[i].position = glm::vec4(100.0f, 100.0f, 100.0f, 100.0f);
+			particleBuffer[i].velocity = glm::vec4(0.0f);
+			particleBuffer[i].acceleration = glm::vec4(0.0f);
+			particleBuffer[i].particleDensity = 0.001f;
+			particleBuffer[i].particlePressure = 0.f;
 		}
 
 		VkDeviceSize storageBufferSize = particleBuffer.size() * sizeof(Particle);
@@ -371,7 +360,6 @@ public:
 		VkDeviceSize cellIndexBufferSize = PARTICLE_COUNT * sizeof(uint32_t);
 		VkDeviceSize cellOffsetBufferSize = gridCount * sizeof(uint32_t);
 		VkDeviceSize neighborCountBuffersize = gridCount * sizeof(int32_t);
-		VkDeviceSize testBufferSize = PARTICLE_COUNT * sizeof(Test);
 
 		vulkanDevice->createBuffer(
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -390,12 +378,6 @@ public:
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 			&cellOffsetBuffer,
 			cellOffsetBufferSize);
-
-		vulkanDevice->createBuffer(
-			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-			&testBuffer,
-			testBufferSize);
 
 		vulkanDevice->createBuffer(
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -498,9 +480,9 @@ public:
 		};
 		std::vector<VkVertexInputAttributeDescription> inputAttributes = {
 			// Location 0 : Position
-			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Particle, pos)),
+			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Particle, position)),
 			// Location 1 : Velocity
-			vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Particle, vel)),
+			vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Particle, velocity)),
 		};
 		VkPipelineVertexInputStateCreateInfo vertexInputState = vks::initializers::pipelineVertexInputStateCreateInfo();
 		vertexInputState.vertexBindingDescriptionCount = static_cast<uint32_t>(inputBindings.size());
@@ -585,17 +567,12 @@ public:
 				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				VK_SHADER_STAGE_COMPUTE_BIT,
 				4),
-			// Binding 5 : Test buffer
-			vks::initializers::descriptorSetLayoutBinding(
-				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				VK_SHADER_STAGE_COMPUTE_BIT,
-				5),
 
-			// Binding 6 : NeighborCount buffer
+			// Binding 5 : NeighborCount buffer
 			vks::initializers::descriptorSetLayoutBinding(
 				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				VK_SHADER_STAGE_COMPUTE_BIT,
-				6)
+				5)
 		};
 		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &compute.descriptorSetLayout));
@@ -633,17 +610,11 @@ public:
 				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				4,
 				&cellOffsetBuffer.descriptor),
-			// Binding 5 : Test buffer
+			// Binding 5 : NeighborCount buffer
 			vks::initializers::writeDescriptorSet(
 				compute.descriptorSet,
 				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				5,
-				&testBuffer.descriptor),
-			// Binding 6 : NeighborCount buffer
-			vks::initializers::writeDescriptorSet(
-				compute.descriptorSet,
-				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				6,
 				&neighborCountBuffer.descriptor)
 		};
 		vkUpdateDescriptorSets(device, static_cast<uint32_t>(computeWriteDescriptorSets.size()), computeWriteDescriptorSets.data(), 0, NULL);
@@ -682,21 +653,21 @@ public:
 		VK_CHECK_RESULT(compute.uniformBuffer.map());
 		float dx = 0.01f;
 		//float dx = 1.0f / sqrt(PARTICLE_COUNT);
-		compute.uniformData.restDensity = 1000.0f;
-		compute.uniformData.smoothRadius = 2.0f * dx;
-		compute.uniformData.mass = compute.uniformData.restDensity * dx * dx * dx * 0.99f;
-		compute.uniformData.viscosity = 1.0f;
-		compute.uniformData.particleStiffness = 1000.0f;
-		compute.uniformData.maxSpeed = 2000.0f;
-		compute.uniformData.gravity = glm::vec2(0.0f, 19.6f);
+		compute.uniformData.restFluidDensity = 1000.0f;
+		compute.uniformData.smoothingRadius = 2.0f * dx;
+		compute.uniformData.particleMass = compute.uniformData.restFluidDensity * dx * dx * dx * 0.99f;
+		compute.uniformData.fluidViscosity = 1.0f;
+		compute.uniformData.pressureStiffness = 1000.0f;
+		compute.uniformData.maxParticleSpeed = 2000.0f;
+		compute.uniformData.gravityVector = glm::vec2(0.0f, 19.8f);
 
 		// grid count
 		float dx_graphics = 0.01f / SCALE;
 		float gridSize = 2.0f * dx_graphics;
 		int res = (int)(2.2f / gridSize) + 1;
-		int gridCount = res * res * res;
-		compute.uniformData.gridCount = gridCount;
-		compute.uniformData.groupSize = gridCount / (PARTICLE_COUNT)+1;
+		int gridCellCount = res * res * res;
+		compute.uniformData.gridCellCount = gridCellCount;
+		compute.uniformData.gridCountPerThread = gridCellCount / (PARTICLE_COUNT)+1;
 
 		updateUniformBuffers();
 
@@ -716,7 +687,7 @@ public:
 
 	void updateUniformBuffers()
 	{
-		compute.uniformData.deltaT = paused ? 0.0f : 0.002f;
+		compute.uniformData.deltaTime = paused ? 0.0f : 0.002f;
 		memcpy(compute.uniformBuffer.mapped, &compute.uniformData, sizeof(Compute::UniformData));
 	}
 
