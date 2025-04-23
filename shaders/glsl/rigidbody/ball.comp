@@ -1,0 +1,178 @@
+#version 450
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct Ball {
+    vec4 position;  // xyz = position, w = radius
+    vec4 velocity;  // xyz = velocity, w = mass
+    vec4 color;     // rgb = color, a = opacity
+};
+
+layout (binding = 0) buffer BallBuffer {
+    Ball balls[];
+};
+
+layout (binding = 1) uniform UBO {
+    vec3 boundaryMin;
+    float deltaTime;
+    vec3 boundaryMax;
+    float gravity;
+    float restitution;
+} ubo;
+
+// Check for collision between two balls
+bool checkBallCollision(uint i, uint j, inout vec3 collisionNormal) {
+    vec3 pos1 = balls[i].position.xyz;
+    vec3 pos2 = balls[j].position.xyz;
+    float radius1 = balls[i].position.w;
+    float radius2 = balls[j].position.w;
+    
+    vec3 distVec = pos2 - pos1;
+    float distance = length(distVec);
+    float minDistance = radius1 + radius2;
+    
+    if (distance < minDistance) {
+        collisionNormal = normalize(distVec);
+        return true;
+    }
+    
+    return false;
+}
+
+// 解决两个球之间的碰撞
+void resolveBallCollision(uint i, uint j, vec3 collisionNormal) {
+    vec3 vel1 = balls[i].velocity.xyz;
+    vec3 vel2 = balls[j].velocity.xyz;
+    float mass1 = balls[i].velocity.w;
+    float mass2 = balls[j].velocity.w;
+    
+    // 相对速度
+    vec3 relVel = vel2 - vel1;
+    
+    // 计算冲量
+    float velAlongNormal = dot(relVel, collisionNormal);
+    
+    // 如果速度正在分离，不解决
+    if (velAlongNormal > 0) {
+        return;
+    }
+    
+    // 计算冲量标量
+    float j1 = -(1.0 + ubo.restitution) * velAlongNormal;
+    j1 /= 1.0/mass1 + 1.0/mass2;
+    
+    // 应用冲量
+    vec3 impulse = j1 * collisionNormal;
+    balls[i].velocity.xyz -= impulse / mass1;
+    balls[j].velocity.xyz += impulse / mass2;
+    
+    // 更强力地分离球体以防止粘连
+    float penetrationDepth = (balls[i].position.w + balls[j].position.w) - length(balls[j].position.xyz - balls[i].position.xyz);
+    
+    // 增加分离系数，确保球体完全分离
+    float separationFactor = 1.1; // 增加到1.1，提供额外的分离
+    vec3 correction = collisionNormal * penetrationDepth * separationFactor;
+    
+    // 根据质量比例分配位移
+    float totalMass = mass1 + mass2;
+    float ratio1 = mass2 / totalMass;
+    float ratio2 = mass1 / totalMass;
+    
+    // 应用位移
+    balls[i].position.xyz -= correction * ratio1;
+    balls[j].position.xyz += correction * ratio2;
+    
+    // 添加一个小的随机扰动，帮助打破对称性
+    if (penetrationDepth > 0.001) {
+        // 使用球体ID创建一个伪随机方向
+        vec3 randomDir = normalize(vec3(
+            sin(float(i * 13 + j * 7)),
+            cos(float(i * 7 + j * 13)),
+            sin(float(i * 5 + j * 11))
+        ));
+        
+        // 添加一个小的随机速度分量
+        float randomFactor = 0.05;
+        balls[i].velocity.xyz += randomDir * randomFactor;
+        balls[j].velocity.xyz -= randomDir * randomFactor;
+    }
+}
+
+
+void main() {
+    // Get global ID
+    uint gID = gl_GlobalInvocationID.x;
+    
+    // Make sure we don't go out of bounds
+    if (gID >= 64) {
+        return;
+    }
+    
+    // Get current ball data
+    vec3 position = balls[gID].position.xyz;
+    vec3 velocity = balls[gID].velocity.xyz;
+    float radius = balls[gID].position.w;
+    
+    // Apply gravity
+    velocity.y += ubo.gravity * ubo.deltaTime;
+    
+    // Update position
+    position += velocity * ubo.deltaTime;
+    
+    // Check boundary collisions
+    // X boundaries
+    if (position.x - radius < ubo.boundaryMin.x) {
+        position.x = ubo.boundaryMin.x + radius;
+        velocity.x = -velocity.x * ubo.restitution;
+    } else if (position.x + radius > ubo.boundaryMax.x) {
+        position.x = ubo.boundaryMax.x - radius;
+        velocity.x = -velocity.x * ubo.restitution;
+    }
+    
+    // Y boundaries
+    if (position.y - radius < ubo.boundaryMin.y) {
+        position.y = ubo.boundaryMin.y + radius;
+        velocity.y = -velocity.y * ubo.restitution;
+    } else if (position.y + radius > ubo.boundaryMax.y) {
+        position.y = ubo.boundaryMax.y - radius;
+        velocity.y = -velocity.y * ubo.restitution;
+    }
+    
+    // Z boundaries
+    if (position.z - radius < ubo.boundaryMin.z) {
+        position.z = ubo.boundaryMin.z + radius;
+        velocity.z = -velocity.z * ubo.restitution;
+    } else if (position.z + radius > ubo.boundaryMax.z) {
+        position.z = ubo.boundaryMax.z - radius;
+        velocity.z = -velocity.z * ubo.restitution;
+    }
+    
+	// 检查与其他球的碰撞
+	for (uint i = 0; i < 64; i++) {
+		if (i != gID) {
+			// 快速距离检查，避免不必要的碰撞计算
+			vec3 diff = balls[i].position.xyz - position;
+			float quickDist = dot(diff, diff);  // 平方距离
+			float minDist = (radius + balls[i].position.w) * (radius + balls[i].position.w);
+			
+			// 只有当球体足够近时才进行详细碰撞检测
+			if (quickDist < minDist) {
+				vec3 collisionNormal;
+				if (checkBallCollision(gID, i, collisionNormal)) {
+					resolveBallCollision(gID, i, collisionNormal);
+					
+					// 碰撞后更新局部变量
+					position = balls[gID].position.xyz;
+					velocity = balls[gID].velocity.xyz;
+				}
+			}
+		}
+	}
+
+    // Apply a small amount of damping to simulate air resistance
+    velocity *= 0.999;
+    
+    // Update ball data
+    balls[gID].position.xyz = position;
+    balls[gID].velocity.xyz = velocity;
+}
