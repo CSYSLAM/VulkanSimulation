@@ -8,13 +8,24 @@
 
 #include "vulkanexamplebase.h"
 #include <chrono>
+#include <iostream>
 
-#define NUM_BALLS 64 // 改为64个球
-#define BALLS_PER_ROW 8  // 每行8个球，形成8×8网格
+#define NUM_BALLS 128
+#define BALLS_PER_ROW 12
 
 class VulkanExample : public VulkanExampleBase
 {
 public:
+    PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR;
+    PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR;
+    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR;
+    PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR;
+    PFN_vkBuildAccelerationStructuresKHR vkBuildAccelerationStructuresKHR;
+    PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR;
+    PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR;
+    PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR;
     std::chrono::steady_clock::time_point startTime;
     std::chrono::steady_clock::time_point lastFrameTime;
 
@@ -24,6 +35,35 @@ public:
         glm::vec4 velocity;  // xyz = velocity, w = mass
         glm::vec4 color;     // rgb = color, a = opacity
     };
+
+    struct AABB {
+        glm::vec3 min;
+        glm::vec3 max;
+    };
+    vks::Buffer aabbsBuffer;
+    uint32_t aabbCount{ 0 };
+    bool isUpdated = false;
+
+    vks::Buffer instanceBuffer; // 新增实例缓冲区
+    std::vector<VkAccelerationStructureInstanceKHR> instancesData;
+
+    struct AccelerationStructure {
+        VkAccelerationStructureKHR handle;
+        uint64_t deviceAddress = 0;
+        VkDeviceMemory memory;
+        VkBuffer buffer;
+    };
+
+    struct ScratchBuffer
+    {
+        uint64_t deviceAddress = 0;
+        VkBuffer handle = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+    };
+
+    AccelerationStructure bottomLevelAS;
+    AccelerationStructure topLevelAS;
+
 
     // Boundary box
     struct BoundaryBox {
@@ -78,11 +118,18 @@ public:
         camera.type = Camera::CameraType::lookat;
         camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 512.0f);
         camera.setRotation(glm::vec3(-30.0f, 45.0f, 0.0f));
-        camera.setTranslation(glm::vec3(0.0f, 0.0f, -10.0f));  // 拉远相机
+        camera.setTranslation(glm::vec3(0.0f, 0.0f, -10.0f));
 
-        // 设置更大的边界盒
         boundaryBox.min = glm::vec3(-3.0f, -3.0f, -3.0f);
         boundaryBox.max = glm::vec3(3.0f, 3.0f, 3.0f);
+
+        enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+        enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+        enabledDeviceExtensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+        enabledDeviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+        enabledDeviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+        enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
+        enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
     }
 
     ~VulkanExample()
@@ -104,6 +151,8 @@ public:
             vkDestroyCommandPool(device, compute.commandPool, nullptr);
 
             storageBuffer.destroy();
+            aabbsBuffer.destroy();
+            instanceBuffer.destroy();
         }
     }
 
@@ -213,6 +262,20 @@ public:
 
         VK_CHECK_RESULT(vkBeginCommandBuffer(compute.commandBuffer, &cmdBufInfo));
 
+        // 插入屏障：确保计算着色器写入完成
+        VkMemoryBarrier memoryBarrier = vks::initializers::memoryBarrier();
+        memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        memoryBarrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        vkCmdPipelineBarrier(
+            compute.commandBuffer,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+            0,
+            1, &memoryBarrier,
+            0, nullptr,
+            0, nullptr
+        );
+
         // Add memory barrier to ensure that the (graphics) vertex shader has fetched attributes before compute starts to write to the buffer
         if (graphics.queueFamilyIndex != compute.queueFamilyIndex)
         {
@@ -273,60 +336,110 @@ public:
         vkEndCommandBuffer(compute.commandBuffer);
     }
 
+    void createInstanceBuffer(std::vector<Ball>& ballBuffer) {
+        // 1. 先创建 staging buffer
+        vks::Buffer stagingBuffer;
+        vulkanDevice->createBuffer(
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &stagingBuffer,
+            sizeof(VkAccelerationStructureInstanceKHR) * NUM_BALLS,
+            nullptr  // 先不传入数据
+        );
+
+        // 2. 初始化 instancesData
+        instancesData.resize(NUM_BALLS);
+        for (uint32_t i = 0; i < NUM_BALLS; ++i) {
+            Ball& ball = ballBuffer[i];
+            VkTransformMatrixKHR transform = {
+                ball.position.w, 0.0f, 0.0f, ball.position.x,
+                0.0f, ball.position.w, 0.0f, ball.position.y,
+                0.0f, 0.0f, ball.position.w, ball.position.z
+            };
+            instancesData[i].transform = transform;
+            instancesData[i].instanceCustomIndex = i;
+            instancesData[i].mask = 0xFF;
+            instancesData[i].flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+            instancesData[i].accelerationStructureReference = bottomLevelAS.deviceAddress;
+        }
+
+        // 3. 将数据复制到 staging buffer
+        void* data;
+        vkMapMemory(device, stagingBuffer.memory, 0, stagingBuffer.size, 0, &data);
+        memcpy(data, instancesData.data(), stagingBuffer.size);
+        vkUnmapMemory(device, stagingBuffer.memory);
+
+        // 4. 创建设备本地缓冲区
+        vulkanDevice->createBuffer(
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            &instanceBuffer,
+            sizeof(VkAccelerationStructureInstanceKHR) * NUM_BALLS,
+            nullptr
+        );
+
+        // 5. 从 staging buffer 复制到设备本地缓冲区
+        VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+        VkBufferCopy copyRegion = {};
+        copyRegion.size = sizeof(VkAccelerationStructureInstanceKHR) * NUM_BALLS;
+        vkCmdCopyBuffer(copyCmd, stagingBuffer.buffer, instanceBuffer.buffer, 1, &copyRegion);
+        vulkanDevice->flushCommandBuffer(copyCmd, queue, true);
+
+        // 6. 清理 staging buffer
+        stagingBuffer.destroy();
+    }
+
     // Setup and fill the compute shader storage buffers containing the balls
     void prepareStorageBuffers()
     {
-        // 初始球位置和速度
         std::vector<Ball> ballBuffer(NUM_BALLS);
 
-        // 计算网格布局
         int ballsPerRow = (int)sqrt(NUM_BALLS);
-        if (ballsPerRow * ballsPerRow < NUM_BALLS) ballsPerRow++;  // 确保有足够的行
-        
-        // 计算间距和起始位置
-        float spacing = 5.0f / ballsPerRow;  // 根据球体数量动态调整间距
-        float startX = -2.5f + spacing/2;
-        float startZ = -2.5f + spacing/2;
-        
-        // 初始化所有球体
+        if (ballsPerRow * ballsPerRow < NUM_BALLS) ballsPerRow++;
+
+        float spacing = 5.0f / ballsPerRow;
+        float startX = -2.5f + spacing / 2;
+        float startZ = -2.5f + spacing / 2;
+
         for (int i = 0; i < NUM_BALLS; i++) {
             Ball& ball = ballBuffer[i];
-            
-            // 计算行和列索引
+
             int row = i / ballsPerRow;
             int col = i % ballsPerRow;
-            
-            // 添加一些随机偏移，使球不完全对齐
+
             float offsetX = ((rand() % 100) / 500.0f) - 0.1f;
             float offsetZ = ((rand() % 100) / 500.0f) - 0.1f;
-            
-            // 位置 (x和z形成网格, y是高度)
-            ball.position = glm::vec4(
-                startX + col * spacing + offsetX,  // x 位置
-                -2.0f + (rand() % 100) / 200.0f,    // y 位置 (高度)
-                startZ + row * spacing + offsetZ,  // z 位置
-                0.12f                              // 半径 (减小以适应更多球体)
-            );
 
-            // 给每个球不同的初始速度和方向
-            float vx = ((rand() % 200) / 100.0f) - 1.0f;  // -1.0到1.0之间的随机速度
-            float vy = 1.0f + (rand() % 100) / 100.0f;    // 1.0到2.0之间的随机向上速度
-            float vz = ((rand() % 200) / 100.0f) - 1.0f;  // -1.0到1.0之间的随机速度
-            
-            ball.velocity = glm::vec4(vx, vy, vz, 1.0f);  // 随机初始速度，w 分量是质量
-            
-            // 给每个球稍微不同的质量
-            ball.velocity.w = 0.8f + (rand() % 40) / 100.0f;  // 0.8到1.2之间的随机质量
-            
-            // 颜色（基于位置生成渐变色）
+			ball.position = glm::vec4(
+				startX + col * spacing + offsetX,
+				-2.0f + (rand() % 500) / 100.0f,
+				startZ + row * spacing + offsetZ,
+				0.5f
+			);
+
+            float vx = ((rand() % 400) / 100.0f) - 2.0f;
+			float vy = 2.0f + (rand() % 200) / 100.0f;
+			float vz = ((rand() % 400) / 100.0f) - 2.0f;
+
+            ball.velocity = glm::vec4(vx, vy, vz, 1.0f);
+            ball.velocity.w = 0.8f + (rand() % 40) / 100.0f;
+
             float r = 0.5f + 0.5f * sin(row * 0.5f);
             float g = 0.5f + 0.5f * sin(col * 0.5f);
             float b = 0.5f + 0.5f * sin((row + col) * 0.3f);
-            
-            // 添加一些随机变化
+
             float colorVar = 0.7f + (rand() % 30) / 100.0f;
             ball.color = glm::vec4(r * colorVar, g * colorVar, b * colorVar, 1.0f);
         }
+
+        std::vector<AABB> aabbs{};
+        for (auto& sphere : ballBuffer) {
+            aabbs.push_back({ 
+                glm::vec3(-1.0f), // min (局部坐标)
+                glm::vec3(1.0f)   // max (局部坐标)
+            });
+        }
+        aabbCount = static_cast<uint32_t>(aabbs.size());
 
         VkDeviceSize storageBufferSize = ballBuffer.size() * sizeof(Ball);
 
@@ -342,7 +455,7 @@ public:
 
         vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             &storageBuffer,
             storageBufferSize);
 
@@ -380,6 +493,309 @@ public:
         vulkanDevice->flushCommandBuffer(copyCmd, queue, true);
 
         stagingBuffer.destroy();
+
+        // AABBs
+        vks::Buffer stagingBufferAABB{};
+        VkBufferUsageFlags usageFlags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+        VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &stagingBufferAABB, sizeof(AABB) * aabbs.size(), aabbs.data()));
+        VK_CHECK_RESULT(vulkanDevice->createBuffer(usageFlags, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &aabbsBuffer, sizeof(AABB) * aabbs.size()));
+        vulkanDevice->copyBuffer(&stagingBufferAABB, &aabbsBuffer, queue);
+        stagingBufferAABB.destroy();
+
+        createInstanceBuffer(ballBuffer);
+    }
+
+    void createAccelerationStructure(AccelerationStructure& accelerationStructure, VkAccelerationStructureTypeKHR type, VkAccelerationStructureBuildSizesInfoKHR buildSizeInfo)
+    {
+        // Buffer and memory
+        VkBufferCreateInfo bufferCreateInfo{};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.size = buildSizeInfo.accelerationStructureSize;
+        bufferCreateInfo.usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        VK_CHECK_RESULT(vkCreateBuffer(vulkanDevice->logicalDevice, &bufferCreateInfo, nullptr, &accelerationStructure.buffer));
+        VkMemoryRequirements memoryRequirements{};
+        vkGetBufferMemoryRequirements(vulkanDevice->logicalDevice, accelerationStructure.buffer, &memoryRequirements);
+        VkMemoryAllocateFlagsInfo memoryAllocateFlagsInfo{};
+        memoryAllocateFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+        memoryAllocateFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
+        VkMemoryAllocateInfo memoryAllocateInfo{};
+        memoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        memoryAllocateInfo.pNext = &memoryAllocateFlagsInfo;
+        memoryAllocateInfo.allocationSize = memoryRequirements.size;
+        memoryAllocateInfo.memoryTypeIndex = vulkanDevice->getMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(vulkanDevice->logicalDevice, &memoryAllocateInfo, nullptr, &accelerationStructure.memory));
+        VK_CHECK_RESULT(vkBindBufferMemory(vulkanDevice->logicalDevice, accelerationStructure.buffer, accelerationStructure.memory, 0));
+        // Acceleration structure
+        VkAccelerationStructureCreateInfoKHR accelerationStructureCreate_info{};
+        accelerationStructureCreate_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+        accelerationStructureCreate_info.buffer = accelerationStructure.buffer;
+        accelerationStructureCreate_info.size = buildSizeInfo.accelerationStructureSize;
+        accelerationStructureCreate_info.type = type;
+        vkCreateAccelerationStructureKHR(vulkanDevice->logicalDevice, &accelerationStructureCreate_info, nullptr, &accelerationStructure.handle);
+        // AS device address
+        VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
+        accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+        accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure.handle;
+        accelerationStructure.deviceAddress = vkGetAccelerationStructureDeviceAddressKHR(vulkanDevice->logicalDevice, &accelerationDeviceAddressInfo);
+    }
+
+    uint64_t getBufferDeviceAddress(VkBuffer buffer)
+    {
+        VkBufferDeviceAddressInfoKHR bufferDeviceAI{};
+        bufferDeviceAI.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+        bufferDeviceAI.buffer = buffer;
+        return vkGetBufferDeviceAddressKHR(vulkanDevice->logicalDevice, &bufferDeviceAI);
+    }
+
+    void loadRayTracingFunctions() {
+        vkGetBufferDeviceAddressKHR = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(vkGetDeviceProcAddr(device, "vkGetBufferDeviceAddressKHR"));
+        vkCreateAccelerationStructureKHR = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(vkGetDeviceProcAddr(device, "vkCreateAccelerationStructureKHR"));
+        vkDestroyAccelerationStructureKHR = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(vkGetDeviceProcAddr(device, "vkDestroyAccelerationStructureKHR"));
+        vkGetAccelerationStructureBuildSizesKHR = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(vkGetDeviceProcAddr(device, "vkGetAccelerationStructureBuildSizesKHR"));
+        vkGetAccelerationStructureDeviceAddressKHR = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(vkGetDeviceProcAddr(device, "vkGetAccelerationStructureDeviceAddressKHR"));
+        vkBuildAccelerationStructuresKHR = reinterpret_cast<PFN_vkBuildAccelerationStructuresKHR>(vkGetDeviceProcAddr(device, "vkBuildAccelerationStructuresKHR"));
+        vkCmdBuildAccelerationStructuresKHR = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(vkGetDeviceProcAddr(device, "vkCmdBuildAccelerationStructuresKHR"));
+        vkCmdTraceRaysKHR = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(vkGetDeviceProcAddr(device, "vkCmdTraceRaysKHR"));
+        vkGetRayTracingShaderGroupHandlesKHR = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(vkGetDeviceProcAddr(device, "vkGetRayTracingShaderGroupHandlesKHR"));
+        vkCreateRayTracingPipelinesKHR = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(vkGetDeviceProcAddr(device, "vkCreateRayTracingPipelinesKHR"));
+    }
+
+    ScratchBuffer createScratchBuffer(VkDeviceSize size)
+    {
+        ScratchBuffer scratchBuffer{};
+        // Buffer and memory
+        VkBufferCreateInfo bufferCreateInfo{};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.size = size;
+        bufferCreateInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        VK_CHECK_RESULT(vkCreateBuffer(vulkanDevice->logicalDevice, &bufferCreateInfo, nullptr, &scratchBuffer.handle));
+        VkMemoryRequirements memoryRequirements{};
+        vkGetBufferMemoryRequirements(vulkanDevice->logicalDevice, scratchBuffer.handle, &memoryRequirements);
+        VkMemoryAllocateFlagsInfo memoryAllocateFlagsInfo{};
+        memoryAllocateFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+        memoryAllocateFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
+        VkMemoryAllocateInfo memoryAllocateInfo = {};
+        memoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        memoryAllocateInfo.pNext = &memoryAllocateFlagsInfo;
+        memoryAllocateInfo.allocationSize = memoryRequirements.size;
+        memoryAllocateInfo.memoryTypeIndex = vulkanDevice->getMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(vulkanDevice->logicalDevice, &memoryAllocateInfo, nullptr, &scratchBuffer.memory));
+        VK_CHECK_RESULT(vkBindBufferMemory(vulkanDevice->logicalDevice, scratchBuffer.handle, scratchBuffer.memory, 0));
+        // Buffer device address
+        VkBufferDeviceAddressInfoKHR bufferDeviceAddresInfo{};
+        bufferDeviceAddresInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+        bufferDeviceAddresInfo.buffer = scratchBuffer.handle;
+        scratchBuffer.deviceAddress = vkGetBufferDeviceAddressKHR(vulkanDevice->logicalDevice, &bufferDeviceAddresInfo);
+        return scratchBuffer;
+    }
+
+    void createBottomLevelAccelerationStructure()
+    {
+        // Build
+        VkAccelerationStructureGeometryKHR accelerationStructureGeometry = vks::initializers::accelerationStructureGeometryKHR();
+        accelerationStructureGeometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+        // Instead of providing actual geometry (e.g. triangles), we only provide the axis aligned bounding boxes (AABBs) of the spheres
+        // The data for the actual spheres is passed elsewhere as a shader storage buffer object
+        accelerationStructureGeometry.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+        accelerationStructureGeometry.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+        accelerationStructureGeometry.geometry.aabbs.data.deviceAddress = getBufferDeviceAddress(aabbsBuffer.buffer);
+        accelerationStructureGeometry.geometry.aabbs.stride = sizeof(AABB);
+
+        // Get size info
+        VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo = vks::initializers::accelerationStructureBuildGeometryInfoKHR();
+        accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        accelerationStructureBuildGeometryInfo.geometryCount = 1;
+        accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
+
+        VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo = vks::initializers::accelerationStructureBuildSizesInfoKHR();
+        vkGetAccelerationStructureBuildSizesKHR(
+            device,
+            VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+            &accelerationStructureBuildGeometryInfo,
+            &aabbCount,
+            &accelerationStructureBuildSizesInfo);
+
+        createAccelerationStructure(bottomLevelAS, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, accelerationStructureBuildSizesInfo);
+
+        // Create a small scratch buffer used during build of the bottom level acceleration structure
+        ScratchBuffer scratchBuffer = createScratchBuffer(accelerationStructureBuildSizesInfo.buildScratchSize);
+
+        VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo = vks::initializers::accelerationStructureBuildGeometryInfoKHR();
+        accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        accelerationBuildGeometryInfo.dstAccelerationStructure = bottomLevelAS.handle;
+        accelerationBuildGeometryInfo.geometryCount = 1;
+        accelerationBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
+        accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer.deviceAddress;
+
+        VkAccelerationStructureBuildRangeInfoKHR accelerationStructureBuildRangeInfo{};
+        accelerationStructureBuildRangeInfo.primitiveCount = aabbCount;
+        std::vector<VkAccelerationStructureBuildRangeInfoKHR*> accelerationBuildStructureRangeInfos = { &accelerationStructureBuildRangeInfo };
+
+        // Build the acceleration structure on the device via a one-time command buffer submission
+        // Some implementations may support acceleration structure building on the host (VkPhysicalDeviceAccelerationStructureFeaturesKHR->accelerationStructureHostCommands), but we prefer device builds
+        VkCommandBuffer commandBuffer = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+        vkCmdBuildAccelerationStructuresKHR(
+            commandBuffer,
+            1,
+            &accelerationBuildGeometryInfo,
+            accelerationBuildStructureRangeInfos.data());
+        vulkanDevice->flushCommandBuffer(commandBuffer, queue);
+
+        if (scratchBuffer.memory != VK_NULL_HANDLE) {
+            vkFreeMemory(vulkanDevice->logicalDevice, scratchBuffer.memory, nullptr);
+        }
+        if (scratchBuffer.handle != VK_NULL_HANDLE) {
+            vkDestroyBuffer(vulkanDevice->logicalDevice, scratchBuffer.handle, nullptr);
+        }
+    }
+
+    void createTopLevelAccelerationStructure()
+    {
+        VkDeviceOrHostAddressConstKHR instanceDataDeviceAddress{};
+        instanceDataDeviceAddress.deviceAddress = getBufferDeviceAddress(instanceBuffer.buffer);
+
+        VkAccelerationStructureGeometryKHR accelerationStructureGeometry = vks::initializers::accelerationStructureGeometryKHR();
+        accelerationStructureGeometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+        accelerationStructureGeometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+        accelerationStructureGeometry.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+        accelerationStructureGeometry.geometry.instances.arrayOfPointers = VK_FALSE;
+        accelerationStructureGeometry.geometry.instances.data = instanceDataDeviceAddress;
+
+        // Get size info
+        VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo = vks::initializers::accelerationStructureBuildGeometryInfoKHR();
+        accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+        accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        accelerationStructureBuildGeometryInfo.geometryCount = 1;
+        accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
+
+        uint32_t primitive_count = 1;
+
+        VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo = vks::initializers::accelerationStructureBuildSizesInfoKHR();
+        vkGetAccelerationStructureBuildSizesKHR(
+            device,
+            VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+            &accelerationStructureBuildGeometryInfo,
+            &primitive_count,
+            &accelerationStructureBuildSizesInfo);
+
+        createAccelerationStructure(topLevelAS, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, accelerationStructureBuildSizesInfo);
+
+        // Create a small scratch buffer used during build of the top level acceleration structure
+        ScratchBuffer scratchBuffer = createScratchBuffer(accelerationStructureBuildSizesInfo.buildScratchSize);
+
+        VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo = vks::initializers::accelerationStructureBuildGeometryInfoKHR();
+        accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+        accelerationBuildGeometryInfo.flags  = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;;
+        accelerationBuildGeometryInfo.mode = isUpdated ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR : VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        accelerationBuildGeometryInfo.dstAccelerationStructure = topLevelAS.handle;
+        accelerationBuildGeometryInfo.geometryCount = 1;
+        accelerationBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
+        accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer.deviceAddress;
+
+        VkAccelerationStructureBuildRangeInfoKHR accelerationStructureBuildRangeInfo{};
+        accelerationStructureBuildRangeInfo.primitiveCount = 1;
+        accelerationStructureBuildRangeInfo.primitiveOffset = 0;
+        accelerationStructureBuildRangeInfo.firstVertex = 0;
+        accelerationStructureBuildRangeInfo.transformOffset = 0;
+        std::vector<VkAccelerationStructureBuildRangeInfoKHR*> accelerationBuildStructureRangeInfos = { &accelerationStructureBuildRangeInfo };
+
+        // Build the acceleration structure on the device via a one-time command buffer submission
+        // Some implementations may support acceleration structure building on the host (VkPhysicalDeviceAccelerationStructureFeaturesKHR->accelerationStructureHostCommands), but we prefer device builds
+        VkCommandBuffer commandBuffer = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+        vkCmdBuildAccelerationStructuresKHR(
+            commandBuffer,
+            1,
+            &accelerationBuildGeometryInfo,
+            accelerationBuildStructureRangeInfos.data());
+        vulkanDevice->flushCommandBuffer(commandBuffer, queue);
+
+        if (scratchBuffer.memory != VK_NULL_HANDLE) {
+            vkFreeMemory(vulkanDevice->logicalDevice, scratchBuffer.memory, nullptr);
+        }
+        if (scratchBuffer.handle != VK_NULL_HANDLE) {
+            vkDestroyBuffer(vulkanDevice->logicalDevice, scratchBuffer.handle, nullptr);
+        }
+    }
+
+    void deleteAccelerationStructure(AccelerationStructure& accelerationStructure)
+    {
+        vkFreeMemory(device, accelerationStructure.memory, nullptr);
+        vkDestroyBuffer(device, accelerationStructure.buffer, nullptr);
+        vkDestroyAccelerationStructureKHR(device, accelerationStructure.handle, nullptr);
+    }
+
+    void updateInstanceBuffer() {
+        // vkWaitForFences(device, 1, &compute.fence, VK_TRUE, UINT64_MAX);
+        void* data;
+        vkMapMemory(device, instanceBuffer.memory, 0, instanceBuffer.size, 0, &data);
+        memcpy(data, instancesData.data(), instanceBuffer.size);
+        vkUnmapMemory(device, instanceBuffer.memory);
+    }
+
+    void updateBallTransforms() {
+        // 确保 storageBuffer 已经正确创建和映射
+        if (!storageBuffer.buffer || !storageBuffer.memory) {
+            std::cout << "Debug: storageBuffer is invalid. buffer: " << (storageBuffer.buffer ? "valid" : "null") 
+                      << ", memory: " << (storageBuffer.memory ? "valid" : "null") << std::endl;
+            return;
+        }
+
+        void* data = nullptr;
+        VkResult result = vkMapMemory(device, storageBuffer.memory, 0, storageBuffer.size, 0, &data);
+        if (result != VK_SUCCESS || !data) {
+            std::cout << "Debug: vkMapMemory failed. Result: " << result << ", data: " << (data ? "valid" : "null") << std::endl;
+            return;
+        }
+
+        Ball* balls = static_cast<Ball*>(data);
+        if (!balls) {
+            std::cout << "Debug: Failed to cast data to Ball*" << std::endl;
+            vkUnmapMemory(device, storageBuffer.memory);
+            return;
+        }
+        
+        std::cout << "Debug: Successfully mapped memory. Buffer size: " << storageBuffer.size 
+                  << ", Ball size: " << sizeof(Ball) << ", Number of balls: " << NUM_BALLS << std::endl;
+        
+        // 更新实例变换矩阵
+        for (uint32_t i = 0; i < NUM_BALLS; ++i) {
+            if (i >= storageBuffer.size / sizeof(Ball)) {
+                std::cout << "Debug: Array index out of bounds. i: " << i 
+                          << ", max index: " << (storageBuffer.size / sizeof(Ball) - 1) << std::endl;
+                break;
+            }
+            Ball& ball = balls[i];
+            VkTransformMatrixKHR transform = {
+                ball.position.w, 0.0f, 0.0f, ball.position.x,
+                0.0f, ball.position.w, 0.0f, ball.position.y,
+                0.0f, 0.0f, ball.position.w, ball.position.z
+            };
+            instancesData[i].transform = transform;
+        }
+        vkUnmapMemory(device, storageBuffer.memory);
+
+        // 创建临时staging buffer用于传输数据到GPU
+        vks::Buffer stagingBuffer;
+        vulkanDevice->createBuffer(
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &stagingBuffer,
+            sizeof(VkAccelerationStructureInstanceKHR) * NUM_BALLS,
+            instancesData.data()
+        );
+
+        VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+        VkBufferCopy copyRegion = {};
+        copyRegion.size = sizeof(VkAccelerationStructureInstanceKHR) * NUM_BALLS;
+        vkCmdCopyBuffer(copyCmd, stagingBuffer.buffer, instanceBuffer.buffer, 1, &copyRegion);
+        vulkanDevice->flushCommandBuffer(copyCmd, queue, true);
+        stagingBuffer.destroy();
     }
 
     // The descriptor pool will be shared between graphics and compute
@@ -387,9 +803,10 @@ public:
     {
         std::vector<VkDescriptorPoolSize> poolSizes = {
             vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2),
-            vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1),
+            vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2),
+            vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1)
         };
-        VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 2);
+        VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 3);
         VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
     }
 
@@ -454,8 +871,8 @@ public:
         vertexInputState.vertexAttributeDescriptionCount = static_cast<uint32_t>(inputAttributes.size());
         vertexInputState.pVertexAttributeDescriptions = inputAttributes.data();
 
-        shaderStages[0] = loadShader(getShadersPath() + "rayquery1/ball.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-        shaderStages[1] = loadShader(getShadersPath() + "rayquery1/ball.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+        shaderStages[0] = loadShader(getShadersPath() + "rigidbody/rigidbody.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+        shaderStages[1] = loadShader(getShadersPath() + "rigidbody/rigidbody.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 
         VkGraphicsPipelineCreateInfo pipelineCreateInfo = vks::initializers::pipelineCreateInfo(graphics.pipelineLayout, renderPass, 0);
         pipelineCreateInfo.pVertexInputState = &vertexInputState;
@@ -501,6 +918,15 @@ public:
                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                 VK_SHADER_STAGE_COMPUTE_BIT,
                 1),
+            // Binding 2 : Acceleration structure
+            vks::initializers::descriptorSetLayoutBinding(
+                VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
+                VK_SHADER_STAGE_COMPUTE_BIT,
+                2),
+            vks::initializers::descriptorSetLayoutBinding(
+                VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                VK_SHADER_STAGE_COMPUTE_BIT,
+                3),
         };
         VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
         VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &compute.descriptorSetLayout));
@@ -519,15 +945,36 @@ public:
                 compute.descriptorSet,
                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                 1,
-                &compute.uniformBuffer.descriptor)
+                &compute.uniformBuffer.descriptor),
         };
+        // Add acceleration structure descriptor
+        VkWriteDescriptorSetAccelerationStructureKHR descriptorAccelerationStructureInfo = vks::initializers::writeDescriptorSetAccelerationStructureKHR();
+        descriptorAccelerationStructureInfo.accelerationStructureCount = 1;
+        descriptorAccelerationStructureInfo.pAccelerationStructures = &topLevelAS.handle;
+
+        VkWriteDescriptorSet accelerationStructureWrite{};
+        accelerationStructureWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        accelerationStructureWrite.pNext = &descriptorAccelerationStructureInfo;
+        accelerationStructureWrite.dstSet = compute.descriptorSet;
+        accelerationStructureWrite.dstBinding = 2;
+        accelerationStructureWrite.descriptorCount = 1;
+        accelerationStructureWrite.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+        computeWriteDescriptorSets.push_back(accelerationStructureWrite);
+
+        VkWriteDescriptorSet computeWriteDescriptorSet = vks::initializers::writeDescriptorSet(
+            compute.descriptorSet,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            3,
+            &instanceBuffer.descriptor);
+        computeWriteDescriptorSets.push_back(computeWriteDescriptorSet);
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(computeWriteDescriptorSets.size()), computeWriteDescriptorSets.data(), 0, NULL);
 
         // Create pipeline
         VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&compute.descriptorSetLayout, 1);
         VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &compute.pipelineLayout));
         VkComputePipelineCreateInfo computePipelineCreateInfo = vks::initializers::computePipelineCreateInfo(compute.pipelineLayout, 0);
-        computePipelineCreateInfo.stage = loadShader(getShadersPath() + "rayquery1/ball.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+        computePipelineCreateInfo.stage = loadShader(getShadersPath() + "rigidbody/rigidbody.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
         VK_CHECK_RESULT(vkCreateComputePipelines(device, pipelineCache, 1, &computePipelineCreateInfo, nullptr, &compute.pipeline));
 
         // Separate command pool as queue family for compute may be different than graphics
@@ -570,8 +1017,8 @@ public:
         // Initialize compute shader uniform data
         compute.uniformData.boundaryMin = boundaryBox.min;
         compute.uniformData.boundaryMax = boundaryBox.max;
-        compute.uniformData.gravity = 0.8f;
-        compute.uniformData.restitution = 0.99f;  // 80% energy conservation on bounce
+        compute.uniformData.gravity = 9.8f;
+        compute.uniformData.restitution = 0.8f;
 
         startTime = std::chrono::steady_clock::now();
         lastFrameTime = startTime;
@@ -595,7 +1042,7 @@ public:
 
         // Limit delta time to avoid large jumps
         if (deltaTime > 0.05f) {
-            deltaTime = 0.05f;
+            deltaTime = 0.016f;
         }
 
         compute.uniformData.deltaTime = deltaTime;
@@ -621,6 +1068,11 @@ public:
         VK_CHECK_RESULT(vkQueueSubmit(compute.queue, 1, &computeSubmitInfo, VK_NULL_HANDLE));
 
         VulkanExampleBase::prepareFrame();
+        if (isUpdated) {
+            updateBallTransforms();
+            createTopLevelAccelerationStructure();
+        }
+        isUpdated = true;
 
         VkPipelineStageFlags graphicsWaitStageMasks[] = { VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
         VkSemaphore graphicsWaitSemaphores[] = { compute.semaphore, semaphores.presentComplete };
@@ -646,8 +1098,12 @@ public:
         // If that's the case, we need additional barriers for acquiring and releasing resources
         graphics.queueFamilyIndex = vulkanDevice->queueFamilyIndices.graphics;
         compute.queueFamilyIndex = vulkanDevice->queueFamilyIndices.compute;
+        loadRayTracingFunctions();
         setupDescriptorPool();
         prepareGraphics();
+		// Create acceleration structures for collision detection
+		createBottomLevelAccelerationStructure();
+		createTopLevelAccelerationStructure();
         prepareCompute();
         buildCommandBuffers();
         prepared = true;
@@ -657,7 +1113,9 @@ public:
     {
         if (!prepared)
             return;
+
         draw();
+
         updateUniformBuffers();
     }
 
@@ -675,5 +1133,3 @@ public:
 };
 
 VULKAN_EXAMPLE_MAIN()
-
-

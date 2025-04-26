@@ -85,7 +85,7 @@ endfunction(buildExamples)
 
 set(EXAMPLES
 	computeclothPBD
-    computeclothSPRING
+    	computeclothSPRING
 	computeclothPBDonlydistcons
 	computeclothPBDNeoHook
 	SPRING_SharedMemory
@@ -100,6 +100,7 @@ set(EXAMPLES
 	simpleParticles_useCsyVk
 	nativeVulkanDemo
 	sph3d_useHead
+	rigidbody
 )
 
 buildExamples()
