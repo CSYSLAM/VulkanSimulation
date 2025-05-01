@@ -101,6 +101,8 @@ set(EXAMPLES
 	nativeVulkanDemo
 	sph3d_useHead
 	rigidbody
+	computeParticlesBDLESS
+	computeParticlesBDA
 )
 
 buildExamples()
