@@ -1,0 +1,182 @@
+#version 460
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_scalar_block_layout : require
+
+const uint MAX_BALLS = 128;
+
+layout (local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+struct Ball {
+    vec4 position;   // xyz=位置, w=半径
+    vec4 velocity;   // xyz=速度, w=质量
+    vec4 color;      // rgb=颜色, a=不透明度
+};
+
+layout (binding = 0) buffer BallBuffer {
+    Ball balls[];
+};
+
+layout (binding = 1) uniform UBO {
+    vec3 boundaryMin;
+    float deltaTime;
+    vec3 boundaryMax;
+    float gravity;
+    float restitution;
+} ubo;
+
+layout(binding = 2) uniform accelerationStructureEXT topLevelAS;
+
+// 实例缓冲区绑定
+struct AccelStructInstanceAnalogue // VkAccelerationStructureInstanceKHR
+{
+    vec4 row1;
+    vec4 row2;
+    vec4 row3;
+    uint instanceMask;
+    uint res2;
+    uint res3;
+    uint res4;
+};
+
+layout (scalar, binding = 3) buffer RTInstanceBufferSSBO
+{
+    AccelStructInstanceAnalogue accelStructInstance[];
+} rtInstanceBuffer;
+
+shared vec4 sharedPredPos[MAX_BALLS];
+
+void updateTransformMatrix(uint gid) {
+    // 从球体位置和半径计算变换矩阵
+    float radius = balls[gid].position.w;
+    vec3 position = balls[gid].position.xyz;
+    
+    // 设置变换矩阵的行
+    rtInstanceBuffer.accelStructInstance[gid].row1 = vec4(radius, 0.0, 0.0, position.x);
+    rtInstanceBuffer.accelStructInstance[gid].row2 = vec4(0.0, radius, 0.0, position.y);
+    rtInstanceBuffer.accelStructInstance[gid].row3 = vec4(0.0, 0.0, radius, position.z);
+    
+    // 确保实例掩码保持不变，只更新低24位的instanceId，保留高8位，只修改低24位，不确定？
+    uint mask = rtInstanceBuffer.accelStructInstance[gid].instanceMask;
+    uint highBits = mask & 0xFF000000u;
+    rtInstanceBuffer.accelStructInstance[gid].instanceMask = highBits | (gid & 0x00FFFFFFu);
+}
+
+void predictPosition(uint gid) {
+    sharedPredPos[gid].xyz = balls[gid].position.xyz + balls[gid].velocity.xyz * ubo.deltaTime;
+    // sharedPredPos[gid].y  += ubo.gravity * ubo.deltaTime * ubo.deltaTime;
+    sharedPredPos[gid].w = 0.0; // w分量无用，置0
+}
+
+void solveBallConstraint(uint a, uint b) {
+    vec3 pa = sharedPredPos[a].xyz;
+    vec3 pb = sharedPredPos[b].xyz;
+    float ra = balls[a].position.w;
+    float rb = balls[b].position.w;
+    vec3 dir = pb - pa;
+    float dist = length(dir);
+    float minDist = ra + rb;
+    
+    if (dist < minDist) {
+        
+        vec3 va = balls[a].velocity.xyz;
+        vec3 vb = balls[b].velocity.xyz;
+
+        balls[a].velocity.xyz = -va * 0.95;
+        balls[b].velocity.xyz = -vb * 0.95;
+        balls[a].color = vec4(1.0, 0.0, 0.0, 1.0);
+        balls[b].color = vec4(1.0, 0.0, 0.0, 1.0);
+    }
+}
+
+void solveBallBVHConstraints(uint gid) {
+    vec3 origin = sharedPredPos[gid].xyz; // 球心
+    float radius = balls[gid].position.w;
+    vec3 dir = balls[gid].velocity.xyz;
+
+    rayQueryEXT rayQuery;
+    rayQueryInitializeEXT(rayQuery, topLevelAS,
+        gl_RayFlagsNoneEXT, // None
+        0xFF,
+        origin,
+        radius,
+        dir,
+        radius * 2.0
+    );
+    
+    while(rayQueryProceedEXT(rayQuery)) {
+        if(rayQueryGetIntersectionTypeEXT(rayQuery, false) == gl_RayQueryCandidateIntersectionAABBEXT) { //AABB
+            
+            uint instanceId = rayQueryGetIntersectionInstanceCustomIndexEXT(rayQuery, false);
+            if (instanceId != gid) {
+                solveBallConstraint(gid, instanceId);
+            }
+        }
+    }
+
+}
+
+// 球-边界约束
+void solveBoundaryConstraint(uint gid) {
+    vec3 minB = ubo.boundaryMin;
+    vec3 maxB = ubo.boundaryMax;
+    vec3 pp = sharedPredPos[gid].xyz;
+    float r = balls[gid].position.w;
+    vec3 v = balls[gid].velocity.xyz;
+    
+    // X轴
+    if (pp.x - r < minB.x) {
+        sharedPredPos[gid].x = minB.x + r + 0.001; // 添加小偏移防止卡在边界
+        balls[gid].velocity.x = -v.x;
+    }
+    if (pp.x + r > maxB.x) {
+        sharedPredPos[gid].x = maxB.x - r - 0.001;
+        balls[gid].velocity.x = -v.x;
+    }
+    
+    // Y轴
+    if (pp.y - r < minB.y) {
+        sharedPredPos[gid].y = minB.y + r + 0.001;
+        balls[gid].velocity.y = -v.y;
+    }
+    if (pp.y + r > maxB.y) {
+        sharedPredPos[gid].y = maxB.y - r - 0.001;
+        balls[gid].velocity.y = -v.y;
+    }
+    
+    // Z轴
+    if (pp.z - r < minB.z) {
+        sharedPredPos[gid].z = minB.z + r + 0.001;
+        balls[gid].velocity.z = -v.z;
+    }
+    if (pp.z + r > maxB.z) {
+        sharedPredPos[gid].z = maxB.z - r - 0.001;
+        balls[gid].velocity.z = -v.z;
+    }
+}
+
+void updateVelocity(uint gid) {
+    vec3 newPos = sharedPredPos[gid].xyz;
+    vec3 oldPos = balls[gid].position.xyz;
+    balls[gid].velocity.xyz = (newPos - oldPos) / ubo.deltaTime;
+}
+
+void updatePosition(uint gid) {
+    balls[gid].position.xyz = sharedPredPos[gid].xyz;
+}
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    if (gid >= MAX_BALLS) return;
+
+    balls[gid].color = vec4(0.0, 1.0, 0.0, 1.0);
+
+    predictPosition(gid);
+    solveBallBVHConstraints(gid);
+    solveBoundaryConstraint(gid);
+    barrier();
+
+    updateVelocity(gid);
+    updatePosition(gid);
+    updateTransformMatrix(gid);
+}
